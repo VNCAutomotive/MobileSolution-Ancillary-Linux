@@ -1,0 +1,16 @@
+--- default.xml.orig	2011-11-07 15:28:34.094106095 +0000
++++ default.xml	2011-11-08 10:49:26.195918033 +0000
+@@ -180,4 +180,13 @@
+   <project path="system/vold" name="platform/system/vold" />
+   <project path="system/wlan/ti" name="platform/system/wlan/ti" />
+ 
++
++  <remote name="linaro"
++	  fetch="git://android.git.linaro.org/" />
++
++    <project remote="linaro" path="external/alsa-lib" name="platform/external/alsa-lib" revision="refs/heads/master" />
++    <project remote="linaro" path="hardware/alsa_sound" name="platform/hardware/alsa_sound" revision="refs/heads/master" />
++    <project remote="linaro" path="external/alsa-utils" name="platform/external/alsa-utils" revision="refs/heads/master" />
++    <project remote="linaro" path="external/mtd-utils" name="platform/external/mtd-utils" revision="refs/heads/master" />
++
+ </manifest>

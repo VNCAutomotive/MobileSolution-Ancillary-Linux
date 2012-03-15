@@ -1,0 +1,49 @@
+From dabebec7f2f8a1b7c3a6c37b51fd919339125769 Mon Sep 17 00:00:00 2001
+From: Toby Gray <toby.gray@realvnc.com>
+Date: Sat, 17 Dec 2011 10:55:10 +0100
+Subject: [PATCH 04/10] usb: cdc-acm: Fix acm_tty_hangup() vs. acm_tty_close() race
+
+Was from "Thilo-Alexander Ginkel"
+
+There is a race condition involving acm_tty_hangup() and acm_tty_close() where
+hangup() would attempt to access tty->driver_data without proper locking and
+NULL checking after close() has potentially already set it to NULL.
+One possibility to (sporadically) trigger this behavior is to perform a
+suspend/resume cycle with a running WWAN data connection.
+
+This patch addresses the issue by introducing a NULL check for
+tty->driver_data in acm_tty_hangup() protected by open_mutex and exiting
+gracefully when hangup() is invoked on a device that has already been closed.
+
+Signed-off-by: Thilo-Alexander Ginkel <thilo@ginkel.com>
+---
+ drivers/usb/class/cdc-acm.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/class/cdc-acm.c b/drivers/usb/class/cdc-acm.c
+index fc23f05..02e3d3e 100644
+--- a/drivers/usb/class/cdc-acm.c
++++ b/drivers/usb/class/cdc-acm.c
+@@ -678,10 +678,17 @@ static void acm_port_down(struct acm *acm, int drain)
+ 
+ static void acm_tty_hangup(struct tty_struct *tty)
+ {
+-	struct acm *acm = tty->driver_data;
++	struct acm *acm;
++	mutex_lock(&open_mutex);
++	acm = tty->driver_data;
++
++	if (!acm)
++		goto out;
++
+ 	tty_port_hangup(&acm->port);
+-	mutex_locklock(&open_mutex);
+ 	acm_port_down(acm, 0);
++
++out:
+ 	mutex_unlock(&open_mutex);
+ }
+ 
+-- 
+1.7.0.4
+

@@ -1,0 +1,95 @@
+From d93a20c7eded4481f9d7de39a62fe23b0a5f06d1 Mon Sep 17 00:00:00 2001
+From: Toby Gray <toby.gray@realvnc.com>
+Date: Mon, 21 Mar 2011 18:04:58 +0000
+Subject: [PATCH 02/10] USB: cdc-acm: Prevent data loss when filling tty buffer.
+
+When sending large quantities of data through a CDC ACM channel it is possible
+for data to be lost when attempting to copy the data to the tty buffer. This
+occurs due to the return value from tty_insert_flip_string not being checked.
+
+This patch adds checking for how many bytes have been inserted into the tty
+buffer and returns any remaining bytes back to the filled read buffer list.
+
+Signed-off-by: Toby Gray <toby.gray@realvnc.com>
+---
+ drivers/usb/class/cdc-acm.c |   25 +++++++++++++++++++++----
+ drivers/usb/class/cdc-acm.h |    1 +
+ 2 files changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/class/cdc-acm.c b/drivers/usb/class/cdc-acm.c
+index 4ee84d8..2259809 100644
+--- a/drivers/usb/class/cdc-acm.c
++++ b/drivers/usb/class/cdc-acm.c
+@@ -363,6 +363,7 @@ static void acm_read_bulk(struct urb *urb)
+ 		dev_dbg(&acm->data->dev, "bulk rx status %d\n", status);
+ 
+ 	buf = rcv->buffer;
++	buf->head = buf->base;
+ 	buf->size = urb->actual_length;
+ 
+ 	if (likely(status == 0)) {
+@@ -392,6 +393,7 @@ static void acm_rx_tasklet(unsigned long _acm)
+ 	struct acm_ru *rcv;
+ 	unsigned long flags;
+ 	unsigned char throttled;
++	int copied;
+ 
+ 	dbg("Entering acm_rx_tasklet");
+ 
+@@ -423,12 +425,14 @@ next_buffer:
+ 
+ 	dbg("acm_rx_tasklet: procesing buf 0x%p, size = %d", buf, buf->size);
+ 
++	copied = buf->size;
+ 	if (tty) {
+ 		spin_lock_irqsave(&acm->throttle_lock, flags);
+ 		throttled = acm->throttle;
+ 		spin_unlock_irqrestore(&acm->throttle_lock, flags);
+ 		if (!throttled) {
+-			tty_insert_flip_string(tty, buf->base, buf->size);
++			copied = tty_insert_flip_string(tty,
++							buf->head, buf->size);
+ 			tty_flip_buffer_push(tty);
+ 		} else {
+ 			tty_kref_put(tty);
+@@ -440,9 +444,22 @@ next_buffer:
+ 		}
+ 	}
+ 
+-	spin_lock_irqsave(&acm->read_lock, flags);
+-	list_add(&buf->list, &acm->spare_read_bufs);
+-	spin_unlock_irqrestore(&acm->read_lock, flags);
++	buf->head += copied;
++	buf->size -= copied;
++
++	if (buf->size == 0) {
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->spare_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++	} else {
++		tty_kref_put(tty);
++		dbg("Partial buffer fill");
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->filled_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++		return;
++	}
++
+ 	goto next_buffer;
+ 
+ urbs:
+diff --git a/drivers/usb/class/cdc-acm.h b/drivers/usb/class/cdc-acm.h
+index 5eeb570..d7581f6 100644
+--- a/drivers/usb/class/cdc-acm.h
++++ b/drivers/usb/class/cdc-acm.h
+@@ -75,6 +75,7 @@ struct acm_rb {
+ 	struct list_head	list;
+ 	int			size;
+ 	unsigned char		*base;
++	unsigned char		*head;
+ 	dma_addr_t		dma;
+ };
+ 
+-- 
+1.7.0.4
+

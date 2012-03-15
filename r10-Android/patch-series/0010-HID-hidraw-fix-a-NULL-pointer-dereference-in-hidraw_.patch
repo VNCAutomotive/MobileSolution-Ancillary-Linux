@@ -1,0 +1,58 @@
+From 5cbad6625440f6e01992f4e0ef59366e3851aa9f Mon Sep 17 00:00:00 2001
+From: Toby Gray <toby.gray@gmail.com>
+Date: Tue, 5 Oct 2010 17:20:17 +0200
+Subject: [PATCH 10/10] HID: hidraw, fix a NULL pointer dereference in hidraw_write
+
+BUG: unable to handle kernel NULL pointer dereference at 0000000000000028
+IP: [<ffffffffa0f0a625>] hidraw_write+0x3b/0x116 [hid]
+[...]
+This is reproducible by disconnecting the device while userspace writes
+to dev node in a loop and doesn't check return values in order to exit
+the loop, like in the following test program:
+
+int main(int argc, char *argv[])
+{
+	int fd = -1;
+	unsigned char report[2] = {0x01, 0x00};
+	int ret;
+	if (argc != 2) {
+		fprintf(stderr, "usage: %s </dev/hidrawX>\n", argv[0]);
+		exit(1);
+	}
+	fd = open(argv[1], O_RDWR);
+	if (fd < 0) {
+		perror("hidraw open");
+		exit(1);
+	}
+	while (1) {
+		ret = write(fd, report, sizeof(report));
+		printf("ret: %d\n", ret);
+	}
+	close(fd);
+	exit(0);
+}
+Signed-off-by: Antonio Ospite <ospite@studenti.unina.it>
+---
+ drivers/hid/hidraw.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/hid/hidraw.c b/drivers/hid/hidraw.c
+index f43e95e..7dca2fa 100644
+--- a/drivers/hid/hidraw.c
++++ b/drivers/hid/hidraw.c
+@@ -111,6 +111,12 @@ static ssize_t hidraw_write(struct file *file, const char __user *buffer, size_t
+ 	int ret = 0;
+ 
+ 	mutex_lock(&minors_lock);
++
++	if (!hidraw_table[minor]) {
++		ret = -ENODEV;
++		goto out;
++	}
++
+ 	dev = hidraw_table[minor]->hid;
+ 
+ 	if (!dev->hid_output_raw_report) {
+-- 
+1.7.0.4
+
