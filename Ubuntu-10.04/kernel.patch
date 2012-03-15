@@ -1,0 +1,110 @@
+Patch based on 2.6.32-40.87
+
+--- a/drivers/usb/class/cdc-acm.c	2012-03-15 15:48:31.090439825 +0000
++++ b/drivers/usb/class/cdc-acm.c	2012-03-15 15:53:08.369874984 +0000
+@@ -364,6 +364,7 @@
+ 		dev_dbg(&acm->data->dev, "bulk rx status %d\n", status);
+ 
+ 	buf = rcv->buffer;
++	buf->head = buf->base;
+ 	buf->size = urb->actual_length;
+ 
+ 	if (likely(status == 0)) {
+@@ -393,6 +394,7 @@
+ 	struct acm_ru *rcv;
+ 	unsigned long flags;
+ 	unsigned char throttled;
++	int copied = 0;
+ 
+ 	dbg("Entering acm_rx_tasklet");
+ 
+@@ -430,7 +432,8 @@
+ 		spin_unlock_irqrestore(&acm->throttle_lock, flags);
+ 		if (!throttled) {
+ 			tty_buffer_request_room(tty, buf->size);
+-			tty_insert_flip_string(tty, buf->base, buf->size);
++			copied = tty_insert_flip_string(tty,
++							buf->head, buf->size);
+ 			tty_flip_buffer_push(tty);
+ 		} else {
+ 			tty_kref_put(tty);
+@@ -442,9 +445,22 @@
+ 		}
+ 	}
+ 
+-	spin_lock_irqsave(&acm->read_lock, flags);
+-	list_add(&buf->list, &acm->spare_read_bufs);
+-	spin_unlock_irqrestore(&acm->read_lock, flags);
++	buf->head += copied;
++	buf->size -= copied;
++
++	if (buf->size == 0) {
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->spare_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++	} else {
++		tty_kref_put(tty);
++		dbg("Partial buffer fill");
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->filled_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++		return;
++	}
++
+ 	goto next_buffer;
+ 
+ urbs:
+@@ -642,7 +658,6 @@
+ static void acm_port_down(struct acm *acm, int drain)
+ {
+ 	int i, nr = acm->rx_buflimit;
+-	mutex_lock(&open_mutex);
+ 	if (acm->dev) {
+ 		usb_autopm_get_interface(acm->control);
+ 		acm_set_control(acm, acm->ctrlout = 0);
+@@ -662,14 +677,24 @@
+ 		acm->control->needs_remote_wakeup = 0;
+ 		usb_autopm_put_interface(acm->control);
+ 	}
+-	mutex_unlock(&open_mutex);
+ }
+ 
+ static void acm_tty_hangup(struct tty_struct *tty)
+ {
+-	struct acm *acm = tty->driver_data;
++	struct acm *acm;
++
++	mutex_lock(&open_mutex);
++
++	acm = tty->driver_data;
++
++	if (!acm)
++		goto out;
++
+ 	tty_port_hangup(&acm->port);
+ 	acm_port_down(acm, 0);
++
++out:
++	mutex_unlock(&open_mutex);
+ }
+ 
+ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
+@@ -680,8 +705,9 @@
+ 	   shutdown */
+ 	if (!acm)
+ 		return;
++
++	mutex_lock(&open_mutex);
+ 	if (tty_port_close_start(&acm->port, tty, filp) == 0) {
+-		mutex_lock(&open_mutex);
+ 		if (!acm->dev) {
+ 			tty_port_tty_set(&acm->port, NULL);
+ 			acm_tty_unregister(acm);
+@@ -693,6 +719,7 @@
+ 	acm_port_down(acm, 0);
+ 	tty_port_close_end(&acm->port, tty);
+ 	tty_port_tty_set(&acm->port, NULL);
++	mutex_unlock(&open_mutex);
+ }
+ 
+ static int acm_tty_write(struct tty_struct *tty,
