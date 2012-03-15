@@ -1,0 +1,279 @@
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.31.orig/drivers/usb/class/cdc-acm.c linux-2.6.31/drivers/usb/class/cdc-acm.c
+--- linux-2.6.31.orig/drivers/usb/class/cdc-acm.c	2009-09-09 23:13:59.000000000 +0100
++++ linux-2.6.31/drivers/usb/class/cdc-acm.c	2011-03-25 10:37:25.000000000 +0000
+@@ -358,6 +358,7 @@
+ 		dev_dbg(&acm->data->dev, "bulk rx status %d\n", status);
+ 
+ 	buf = rcv->buffer;
++	buf->head = buf->base;
+ 	buf->size = urb->actual_length;
+ 
+ 	if (likely(status == 0)) {
+@@ -387,6 +388,7 @@
+ 	struct acm_ru *rcv;
+ 	unsigned long flags;
+ 	unsigned char throttled;
++	int copied;
+ 
+ 	dbg("Entering acm_rx_tasklet");
+ 
+@@ -418,13 +420,15 @@
+ 
+ 	dbg("acm_rx_tasklet: procesing buf 0x%p, size = %d", buf, buf->size);
+ 
++	copied = buf->size;
+ 	if (tty) {
+ 		spin_lock_irqsave(&acm->throttle_lock, flags);
+ 		throttled = acm->throttle;
+ 		spin_unlock_irqrestore(&acm->throttle_lock, flags);
+ 		if (!throttled) {
+ 			tty_buffer_request_room(tty, buf->size);
+-			tty_insert_flip_string(tty, buf->base, buf->size);
++			copied = tty_insert_flip_string(tty,
++							buf->head, buf->size);
+ 			tty_flip_buffer_push(tty);
+ 		} else {
+ 			tty_kref_put(tty);
+@@ -436,9 +440,24 @@
+ 		}
+ 	}
+ 
+-	spin_lock_irqsave(&acm->read_lock, flags);
+-	list_add(&buf->list, &acm->spare_read_bufs);
+-	spin_unlock_irqrestore(&acm->read_lock, flags);
++	buf->head += copied;
++	buf->size -= copied;
++
++	if (buf->size == 0) {
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->spare_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++	} else {
++		tty_kref_put(tty);
++		dbg("Partial buffer fill");
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->filled_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++		/* Make sure that the tasklet will get run again. */
++		schedule_work(&acm->work_throttle_check);
++		return;
++	}
++
+ 	goto next_buffer;
+ 
+ urbs:
+@@ -515,14 +534,14 @@
+ 	acm_write_done(acm, wb);
+ 	spin_unlock_irqrestore(&acm->write_lock, flags);
+ 	if (ACM_READY(acm))
+-		schedule_work(&acm->work);
++		schedule_work(&acm->work_wake);
+ 	else
+ 		wake_up_interruptible(&acm->drain_wait);
+ }
+ 
+-static void acm_softint(struct work_struct *work)
++static void acm_softint_wake(struct work_struct *work)
+ {
+-	struct acm *acm = container_of(work, struct acm, work);
++	struct acm *acm = container_of(work, struct acm, work_wake);
+ 	struct tty_struct *tty;
+ 
+ 	dev_vdbg(&acm->data->dev, "tx work\n");
+@@ -550,6 +569,42 @@
+ 	usb_autopm_put_interface(acm->control);
+ }
+ 
++static void acm_softint_throttle_check(struct work_struct *work)
++{
++	struct acm *acm = container_of(work, struct acm, work_throttle_check);
++	struct tty_struct *tty;
++	struct acm_rb *buf;
++	size_t needed = 1;
++	int available;
++
++	dev_vdbg(&acm->data->dev, "throttle check\n");
++	if (!ACM_READY(acm))
++		return;
++	tty = tty_port_tty_get(&acm->port);
++	if (!tty)
++		return;
++
++	/* See how much space is needed */
++	spin_lock(&acm->read_lock);
++	if (!list_empty(&acm->filled_read_bufs)) {
++		buf = list_entry(acm->filled_read_bufs.next,
++				 struct acm_rb, list);
++		needed = buf->size;
++	}
++	spin_unlock(&acm->read_lock);
++
++	available = tty_buffer_request_room(tty, needed);
++	if (available < needed) {
++		/* Throttle so that notification occurs when there is
++		 * more space available in the buffers. */
++		tty_throttle(tty);
++	} else {
++		/* Buffer has already been emptied, restart reading */
++		tasklet_schedule(&acm->urb_task);
++	}
++	tty_kref_put(tty);
++}
++
+ /*
+  * TTY handlers
+  */
+@@ -979,7 +1034,8 @@
+ 	}
+ 
+ 	if (!buflen) {
+-		if (intf->cur_altsetting->endpoint->extralen &&
++		if (intf->cur_altsetting->endpoint &&
++				intf->cur_altsetting->endpoint->extralen &&
+ 				intf->cur_altsetting->endpoint->extra) {
+ 			dev_dbg(&intf->dev,
+ 				"Seeking extra descriptors on endpoint\n");
+@@ -1172,7 +1228,8 @@
+ 	acm->rx_buflimit = num_rx_buf;
+ 	acm->urb_task.func = acm_rx_tasklet;
+ 	acm->urb_task.data = (unsigned long) acm;
+-	INIT_WORK(&acm->work, acm_softint);
++	INIT_WORK(&acm->work_wake, acm_softint_wake);
++	INIT_WORK(&acm->work_throttle_check, acm_softint_throttle_check);
+ 	INIT_WORK(&acm->waker, acm_waker);
+ 	init_waitqueue_head(&acm->drain_wait);
+ 	spin_lock_init(&acm->throttle_lock);
+@@ -1328,6 +1385,7 @@
+ 	dbg("Entering stop_data_traffic");
+ 
+ 	tasklet_disable(&acm->urb_task);
++	cancel_work_sync(&acm->work_throttle_check);
+ 
+ 	usb_kill_urb(acm->ctrlurb);
+ 	for (i = 0; i < ACM_NW; i++)
+@@ -1337,7 +1395,7 @@
+ 
+ 	tasklet_enable(&acm->urb_task);
+ 
+-	cancel_work_sync(&acm->work);
++	cancel_work_sync(&acm->work_wake);
+ 	cancel_work_sync(&acm->waker);
+ }
+ 
+@@ -1456,6 +1514,17 @@
+ }
+ 
+ #endif /* CONFIG_PM */
++
++#define NOKIA_PCSUITE_ACM_INFO(x) \
++		USB_DEVICE_AND_INTERFACE_INFO(0x0421, x, \
++		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
++		USB_CDC_ACM_PROTO_VENDOR)
++
++#define SAMSUNG_PCSUITE_ACM_INFO(x) \
++		USB_DEVICE_AND_INTERFACE_INFO(0x04e7, x, \
++		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
++		USB_CDC_ACM_PROTO_VENDOR)
++
+ /*
+  * USB driver structure.
+  */
+@@ -1514,6 +1583,69 @@
+ 	.driver_info = NO_UNION_NORMAL, /* reports zero length descriptor */
+ 	},
+ 
++	/* Nokia S60 phones expose two ACM channels. The first is
++	 * a modem and is picked up by the standard AT-command
++	 * information below. The second is 'vendor-specific' but
++	 * is treated as a serial device at the S60 end, so we want
++	 * to expose it on Linux too. */
++	{ NOKIA_PCSUITE_ACM_INFO(0x042D), }, /* Nokia 3250 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04D8), }, /* Nokia 5500 Sport */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04C9), }, /* Nokia E50 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0419), }, /* Nokia E60 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x044D), }, /* Nokia E61 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0001), }, /* Nokia E61i */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0475), }, /* Nokia E62 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0508), }, /* Nokia E65 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0418), }, /* Nokia E70 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0425), }, /* Nokia N71 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0486), }, /* Nokia N73 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04DF), }, /* Nokia N75 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x000e), }, /* Nokia N77 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0445), }, /* Nokia N80 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x042F), }, /* Nokia N91 & N91 8GB */
++	{ NOKIA_PCSUITE_ACM_INFO(0x048E), }, /* Nokia N92 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0420), }, /* Nokia N93 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04E6), }, /* Nokia N93i  */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04B2), }, /* Nokia 5700 XpressMusic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0134), }, /* Nokia 6110 Navigator (China) */
++	{ NOKIA_PCSUITE_ACM_INFO(0x046E), }, /* Nokia 6110 Navigator */
++	{ NOKIA_PCSUITE_ACM_INFO(0x002f), }, /* Nokia 6120 classic &  */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0088), }, /* Nokia 6121 classic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x00fc), }, /* Nokia 6124 classic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0042), }, /* Nokia E51 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x00b0), }, /* Nokia E66 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x00ab), }, /* Nokia E71 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0481), }, /* Nokia N76 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0007), }, /* Nokia N81 & N81 8GB */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0071), }, /* Nokia N82 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04F0), }, /* Nokia N95 & N95-3 NAM */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0070), }, /* Nokia N95 8GB  */
++	{ NOKIA_PCSUITE_ACM_INFO(0x00e9), }, /* Nokia 5320 XpressMusic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0099), }, /* Nokia 6210 Navigator, RM-367 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0128), }, /* Nokia 6210 Navigator, RM-419 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x008f), }, /* Nokia 6220 Classic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x00a0), }, /* Nokia 6650 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x007b), }, /* Nokia N78 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0094), }, /* Nokia N85 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x003a), }, /* Nokia N96 & N96-3  */
++	{ NOKIA_PCSUITE_ACM_INFO(0x00e9), }, /* Nokia 5320 XpressMusic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0108), }, /* Nokia 5320 XpressMusic 2G */
++	{ NOKIA_PCSUITE_ACM_INFO(0x01f5), }, /* Nokia N97, RM-505 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x02e3), }, /* Nokia 5230, RM-588 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0178), }, /* Nokia E63 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x010e), }, /* Nokia E75 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x02d9), }, /* Nokia 6760 Slide */
++	{ NOKIA_PCSUITE_ACM_INFO(0x01d0), }, /* Nokia E52 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0223), }, /* Nokia E72 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0275), }, /* Nokia X6 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x026c), }, /* Nokia N97 Mini */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0154), }, /* Nokia 5800 XpressMusic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04ce), }, /* Nokia E90 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x01d4), }, /* Nokia E55 */
++	{ SAMSUNG_PCSUITE_ACM_INFO(0x6651), }, /* Samsung GTi8510 (INNOV8) */
++
++	/* NOTE: non-Nokia COMM/ACM/0xff is likely MSFT RNDIS... NOT a modem! */
++
+ 	/* control interfaces with various AT-command sets */
+ 	{ USB_INTERFACE_INFO(USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM,
+ 		USB_CDC_ACM_PROTO_AT_V25TER) },
+@@ -1528,7 +1660,6 @@
+ 	{ USB_INTERFACE_INFO(USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM,
+ 		USB_CDC_ACM_PROTO_AT_CDMA) },
+ 
+-	/* NOTE:  COMM/ACM/0xff is likely MSFT RNDIS ... NOT a modem!! */
+ 	{ }
+ };
+ 
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.31.orig/drivers/usb/class/cdc-acm.h linux-2.6.31/drivers/usb/class/cdc-acm.h
+--- linux-2.6.31.orig/drivers/usb/class/cdc-acm.h	2009-09-09 23:13:59.000000000 +0100
++++ linux-2.6.31/drivers/usb/class/cdc-acm.h	2011-03-25 10:36:20.000000000 +0000
+@@ -75,6 +75,7 @@
+ 	struct list_head	list;
+ 	int			size;
+ 	unsigned char		*base;
++	unsigned char		*head;
+ 	dma_addr_t		dma;
+ };
+ 
+@@ -111,7 +112,8 @@
+ 	spinlock_t write_lock;
+ 	struct mutex mutex;
+ 	struct usb_cdc_line_coding line;		/* bits, stop, parity */
+-	struct work_struct work;			/* work queue entry for line discipline waking up */
++	struct work_struct work_wake;			/* for tty wake up */
++	struct work_struct work_throttle_check;		/* for throttling */
+ 	struct work_struct waker;
+ 	wait_queue_head_t drain_wait;			/* close processing */
+ 	struct tasklet_struct urb_task;                 /* rx processing */

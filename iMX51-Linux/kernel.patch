@@ -1,0 +1,2329 @@
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/hidraw.c linux-2.6.35.3/drivers/hid/hidraw.c
+--- linux-2.6.35.3.orig/drivers/hid/hidraw.c	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/drivers/hid/hidraw.c	2012-03-07 16:45:54.000000000 +0000
+@@ -111,6 +111,12 @@
+ 	int ret = 0;
+ 
+ 	mutex_lock(&minors_lock);
++
++	if (!hidraw_table[minor]) {
++		ret = -ENODEV;
++		goto out;
++	}
++
+ 	dev = hidraw_table[minor]->hid;
+ 
+ 	if (!dev->hid_output_raw_report) {
+@@ -246,6 +252,10 @@
+ 
+ 	mutex_lock(&minors_lock);
+ 	dev = hidraw_table[minor];
++	if (!dev) {
++		ret = -ENODEV;
++		goto out;
++	}
+ 
+ 	switch (cmd) {
+ 		case HIDIOCGRDESCSIZE:
+@@ -319,6 +329,7 @@
+ 
+ 		ret = -ENOTTY;
+ 	}
++out:
+ 	mutex_unlock(&minors_lock);
+ 	return ret;
+ }
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/usbhid/hiddev.c linux-2.6.35.3/drivers/hid/usbhid/hiddev.c
+--- linux-2.6.35.3.orig/drivers/hid/usbhid/hiddev.c	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/drivers/hid/usbhid/hiddev.c	2012-02-15 17:11:50.000000000 +0000
+@@ -592,161 +592,168 @@
+ {
+ 	struct hiddev_list *list = file->private_data;
+ 	struct hiddev *hiddev = list->hiddev;
+-	struct hid_device *hid = hiddev->hid;
+-	struct usb_device *dev = hid_to_usb_dev(hid);
++	struct hid_device *hid;
+ 	struct hiddev_collection_info cinfo;
+ 	struct hiddev_report_info rinfo;
+ 	struct hiddev_field_info finfo;
+ 	struct hiddev_devinfo dinfo;
+ 	struct hid_report *report;
+ 	struct hid_field *field;
+-	struct usbhid_device *usbhid = hid->driver_data;
+ 	void __user *user_arg = (void __user *)arg;
+-	int i, r;
+-	
++	int i, r = -EINVAL;
++
+ 	/* Called without BKL by compat methods so no BKL taken */
+ 
+-	/* FIXME: Who or what stop this racing with a disconnect ?? */
+-	if (!hiddev->exist)
+-		return -EIO;
++	mutex_lock(&hiddev->existancelock);
++	if (!hiddev->exist) {
++		r = -ENODEV;
++		goto ret_unlock;
++	}
++
++	hid = hiddev->hid;
+ 
+ 	switch (cmd) {
+ 
+ 	case HIDIOCGVERSION:
+-		return put_user(HID_VERSION, (int __user *)arg);
++		r = put_user(HID_VERSION, (int __user *)arg) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	case HIDIOCAPPLICATION:
+ 		if (arg < 0 || arg >= hid->maxapplication)
+-			return -EINVAL;
++			break;
+ 
+ 		for (i = 0; i < hid->maxcollection; i++)
+ 			if (hid->collection[i].type ==
+ 			    HID_COLLECTION_APPLICATION && arg-- == 0)
+ 				break;
+ 
+-		if (i == hid->maxcollection)
+-			return -EINVAL;
+-
+-		return hid->collection[i].usage;
++		if (i < hid->maxcollection)
++			r = hid->collection[i].usage;
++		break;
+ 
+ 	case HIDIOCGDEVINFO:
+-		dinfo.bustype = BUS_USB;
+-		dinfo.busnum = dev->bus->busnum;
+-		dinfo.devnum = dev->devnum;
+-		dinfo.ifnum = usbhid->ifnum;
+-		dinfo.vendor = le16_to_cpu(dev->descriptor.idVendor);
+-		dinfo.product = le16_to_cpu(dev->descriptor.idProduct);
+-		dinfo.version = le16_to_cpu(dev->descriptor.bcdDevice);
+-		dinfo.num_applications = hid->maxapplication;
+-		if (copy_to_user(user_arg, &dinfo, sizeof(dinfo)))
+-			return -EFAULT;
++		{
++			struct usb_device *dev = hid_to_usb_dev(hid);
++			struct usbhid_device *usbhid = hid->driver_data;
+ 
+-		return 0;
++			dinfo.bustype = BUS_USB;
++			dinfo.busnum = dev->bus->busnum;
++			dinfo.devnum = dev->devnum;
++			dinfo.ifnum = usbhid->ifnum;
++			dinfo.vendor = le16_to_cpu(dev->descriptor.idVendor);
++			dinfo.product = le16_to_cpu(dev->descriptor.idProduct);
++			dinfo.version = le16_to_cpu(dev->descriptor.bcdDevice);
++			dinfo.num_applications = hid->maxapplication;
++
++			r = copy_to_user(user_arg, &dinfo, sizeof(dinfo)) ?
++				-EFAULT : 0;
++			break;
++		}
+ 
+ 	case HIDIOCGFLAG:
+-		if (put_user(list->flags, (int __user *)arg))
+-			return -EFAULT;
+-
+-		return 0;
++		r = put_user(list->flags, (int __user *)arg) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	case HIDIOCSFLAG:
+ 		{
+ 			int newflags;
+-			if (get_user(newflags, (int __user *)arg))
+-				return -EFAULT;
++
++			if (get_user(newflags, (int __user *)arg)) {
++				r = -EFAULT;
++				break;
++			}
+ 
+ 			if ((newflags & ~HIDDEV_FLAGS) != 0 ||
+ 			    ((newflags & HIDDEV_FLAG_REPORT) != 0 &&
+ 			     (newflags & HIDDEV_FLAG_UREF) == 0))
+-				return -EINVAL;
++				break;
+ 
+ 			list->flags = newflags;
+ 
+-			return 0;
++			r = 0;
++			break;
+ 		}
+ 
+ 	case HIDIOCGSTRING:
+-		mutex_lock(&hiddev->existancelock);
+-		if (hiddev->exist)
+-			r = hiddev_ioctl_string(hiddev, cmd, user_arg);
+-		else
+-			r = -ENODEV;
+-		mutex_unlock(&hiddev->existancelock);
+-		return r;
++		r = hiddev_ioctl_string(hiddev, cmd, user_arg);
++		break;
+ 
+ 	case HIDIOCINITREPORT:
+-		mutex_lock(&hiddev->existancelock);
+-		if (!hiddev->exist) {
+-			mutex_unlock(&hiddev->existancelock);
+-			return -ENODEV;
+-		}
+ 		usbhid_init_reports(hid);
+-		mutex_unlock(&hiddev->existancelock);
+-
+-		return 0;
++		r = 0;
++		break;
+ 
+ 	case HIDIOCGREPORT:
+-		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo)))
+-			return -EFAULT;
++		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo))) {
++			r = -EFAULT;
++			break;
++		}
+ 
+ 		if (rinfo.report_type == HID_REPORT_TYPE_OUTPUT)
+-			return -EINVAL;
++			break;
+ 
+-		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
+-			return -EINVAL;
++		report = hiddev_lookup_report(hid, &rinfo);
++		if (report == NULL)
++			break;
+ 
+-		mutex_lock(&hiddev->existancelock);
+-		if (hiddev->exist) {
+-			usbhid_submit_report(hid, report, USB_DIR_IN);
+-			usbhid_wait_io(hid);
+-		}
+-		mutex_unlock(&hiddev->existancelock);
++		usbhid_submit_report(hid, report, USB_DIR_IN);
++		usbhid_wait_io(hid);
+ 
+-		return 0;
++		r = 0;
++		break;
+ 
+ 	case HIDIOCSREPORT:
+-		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo)))
+-			return -EFAULT;
++		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo))) {
++			r = -EFAULT;
++			break;
++		}
+ 
+ 		if (rinfo.report_type == HID_REPORT_TYPE_INPUT)
+-			return -EINVAL;
++			break;
+ 
+-		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
+-			return -EINVAL;
++		report = hiddev_lookup_report(hid, &rinfo);
++		if (report == NULL)
++			break;
+ 
+-		mutex_lock(&hiddev->existancelock);
+-		if (hiddev->exist) {
+-			usbhid_submit_report(hid, report, USB_DIR_OUT);
+-			usbhid_wait_io(hid);
+-		}
+-		mutex_unlock(&hiddev->existancelock);
++		usbhid_submit_report(hid, report, USB_DIR_OUT);
++		usbhid_wait_io(hid);
+ 
+-		return 0;
++		r = 0;
++		break;
+ 
+ 	case HIDIOCGREPORTINFO:
+-		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo)))
+-			return -EFAULT;
++		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo))) {
++			r = -EFAULT;
++			break;
++		}
+ 
+-		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
+-			return -EINVAL;
++		report = hiddev_lookup_report(hid, &rinfo);
++		if (report == NULL)
++			break;
+ 
+ 		rinfo.num_fields = report->maxfield;
+ 
+-		if (copy_to_user(user_arg, &rinfo, sizeof(rinfo)))
+-			return -EFAULT;
+-
+-		return 0;
++		r = copy_to_user(user_arg, &rinfo, sizeof(rinfo)) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	case HIDIOCGFIELDINFO:
+-		if (copy_from_user(&finfo, user_arg, sizeof(finfo)))
+-			return -EFAULT;
++		if (copy_from_user(&finfo, user_arg, sizeof(finfo))) {
++			r = -EFAULT;
++			break;
++		}
++
+ 		rinfo.report_type = finfo.report_type;
+ 		rinfo.report_id = finfo.report_id;
+-		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
+-			return -EINVAL;
++
++		report = hiddev_lookup_report(hid, &rinfo);
++		if (report == NULL)
++			break;
+ 
+ 		if (finfo.field_index >= report->maxfield)
+-			return -EINVAL;
++			break;
+ 
+ 		field = report->field[finfo.field_index];
+ 		memset(&finfo, 0, sizeof(finfo));
+@@ -765,10 +772,9 @@
+ 		finfo.unit_exponent = field->unit_exponent;
+ 		finfo.unit = field->unit;
+ 
+-		if (copy_to_user(user_arg, &finfo, sizeof(finfo)))
+-			return -EFAULT;
+-
+-		return 0;
++		r = copy_to_user(user_arg, &finfo, sizeof(finfo)) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	case HIDIOCGUCODE:
+ 		/* fall through */
+@@ -777,57 +783,66 @@
+ 	case HIDIOCGUSAGES:
+ 	case HIDIOCSUSAGES:
+ 	case HIDIOCGCOLLECTIONINDEX:
+-		mutex_lock(&hiddev->existancelock);
+-		if (hiddev->exist)
+-			r = hiddev_ioctl_usage(hiddev, cmd, user_arg);
+-		else
+-			r = -ENODEV;
+-		mutex_unlock(&hiddev->existancelock);
+-		return r;
++		r = hiddev_ioctl_usage(hiddev, cmd, user_arg);
++		break;
+ 
+ 	case HIDIOCGCOLLECTIONINFO:
+-		if (copy_from_user(&cinfo, user_arg, sizeof(cinfo)))
+-			return -EFAULT;
++		if (copy_from_user(&cinfo, user_arg, sizeof(cinfo))) {
++			r = -EFAULT;
++			break;
++		}
+ 
+ 		if (cinfo.index >= hid->maxcollection)
+-			return -EINVAL;
++			break;
+ 
+ 		cinfo.type = hid->collection[cinfo.index].type;
+ 		cinfo.usage = hid->collection[cinfo.index].usage;
+ 		cinfo.level = hid->collection[cinfo.index].level;
+ 
+-		if (copy_to_user(user_arg, &cinfo, sizeof(cinfo)))
+-			return -EFAULT;
+-		return 0;
++		r = copy_to_user(user_arg, &cinfo, sizeof(cinfo)) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	default:
+-
+ 		if (_IOC_TYPE(cmd) != 'H' || _IOC_DIR(cmd) != _IOC_READ)
+-			return -EINVAL;
++			break;
+ 
+ 		if (_IOC_NR(cmd) == _IOC_NR(HIDIOCGNAME(0))) {
+ 			int len;
+-			if (!hid->name)
+-				return 0;
++
++			if (!hid->name) {
++				r = 0;
++				break;
++			}
++
+ 			len = strlen(hid->name) + 1;
+ 			if (len > _IOC_SIZE(cmd))
+ 				 len = _IOC_SIZE(cmd);
+-			return copy_to_user(user_arg, hid->name, len) ?
++			r = copy_to_user(user_arg, hid->name, len) ?
+ 				-EFAULT : len;
++			break;
+ 		}
+ 
+ 		if (_IOC_NR(cmd) == _IOC_NR(HIDIOCGPHYS(0))) {
+ 			int len;
+-			if (!hid->phys)
+-				return 0;
++
++			if (!hid->phys) {
++				r = 0;
++				break;
++			}
++
+ 			len = strlen(hid->phys) + 1;
+ 			if (len > _IOC_SIZE(cmd))
+ 				len = _IOC_SIZE(cmd);
+-			return copy_to_user(user_arg, hid->phys, len) ?
++			r = copy_to_user(user_arg, hid->phys, len) ?
+ 				-EFAULT : len;
++			break;
+ 		}
+ 	}
+-	return -EINVAL;
++
++ret_unlock:
++	mutex_unlock(&hiddev->existancelock);
++	return r;
+ }
+ 
+ #ifdef CONFIG_COMPAT
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/media/video/em28xx/em28xx-core.c linux-2.6.35.3/drivers/media/video/em28xx/em28xx-core.c
+--- linux-2.6.35.3.orig/drivers/media/video/em28xx/em28xx-core.c	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/drivers/media/video/em28xx/em28xx-core.c	2012-02-16 12:54:03.000000000 +0000
+@@ -774,8 +774,6 @@
+ 	else
+ 		dev->vbi_height = 18;
+ 
+-	if (!dev->progressive)
+-		height >>= norm_maxh(dev);
+ 
+ 	em28xx_set_outfmt(dev);
+ 
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_ncm.c linux-2.6.35.3/drivers/net/usb/cdc_ncm.c
+--- linux-2.6.35.3.orig/drivers/net/usb/cdc_ncm.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-2.6.35.3/drivers/net/usb/cdc_ncm.c	2012-02-15 17:12:40.000000000 +0000
+@@ -0,0 +1,1297 @@
++/*
++ * cdc_ncm.c
++ *
++ * Copyright (C) ST-Ericsson 2010-2011
++ * Contact: Alexey Orishko <alexey.orishko@stericsson.com>
++ * Original author: Hans Petter Selasky <hans.petter.selasky@stericsson.com>
++ *
++ * USB Host Driver for Network Control Model (NCM)
++ * http://www.usb.org/developers/devclass_docs/NCM10.zip
++ *
++ * The NCM encoding, decoding and initialization logic
++ * derives from FreeBSD 8.x. if_cdce.c and if_cdcereg.h
++ *
++ * This software is available to you under a choice of one of two
++ * licenses. You may choose this file to be licensed under the terms
++ * of the GNU General Public License (GPL) Version 2 or the 2-clause
++ * BSD license listed below:
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/netdevice.h>
++#include <linux/ctype.h>
++#include <linux/ethtool.h>
++#include <linux/workqueue.h>
++#include <linux/mii.h>
++#include <linux/crc32.h>
++#include <linux/usb.h>
++#include <linux/version.h>
++#include <linux/timer.h>
++#include <linux/spinlock.h>
++#include <linux/usb/usbnet.h>
++#include <linux/usb/cdc.h>
++
++#define	DRIVER_VERSION				"01-June-2011"
++
++/* CDC NCM subclass 3.2.1 */
++#define USB_CDC_NCM_NDP16_LENGTH_MIN		0x10
++
++/* Maximum NTB length */
++#define	CDC_NCM_NTB_MAX_SIZE_TX			16384	/* bytes */
++#define	CDC_NCM_NTB_MAX_SIZE_RX			16384	/* bytes */
++
++/* Minimum value for MaxDatagramSize, ch. 6.2.9 */
++#define	CDC_NCM_MIN_DATAGRAM_SIZE		1514	/* bytes */
++
++#define	CDC_NCM_MIN_TX_PKT			512	/* bytes */
++
++/* Maximum value for MaxDatagramSize, this is 16k (max NTB size)
++ * minus NTH size (12 bytes) and minus the smallest possible NDP size
++ * (16 bytes). */
++#define	CDC_NCM_MAX_DATAGRAM_SIZE		16356	/* bytes */
++
++/*
++ * Maximum amount of datagrams in NCM Datagram Pointer Table, not counting
++ * the last NULL entry. Any additional datagrams in NTB would be discarded.
++ */
++#define	CDC_NCM_DPT_DATAGRAMS_MAX		32
++
++/* Maximum amount of IN datagrams in NTB */
++#define	CDC_NCM_DPT_DATAGRAMS_IN_MAX		0 /* unlimited */
++
++/* Restart the timer, if amount of datagrams is less than given value */
++#define	CDC_NCM_RESTART_TIMER_DATAGRAM_CNT	3
++
++/* The following macro defines the minimum header space */
++#define	CDC_NCM_MIN_HDR_SIZE \
++	(sizeof(struct usb_cdc_ncm_nth16) + sizeof(struct usb_cdc_ncm_ndp16) + \
++	(CDC_NCM_DPT_DATAGRAMS_MAX + 1) * sizeof(struct usb_cdc_ncm_dpe16))
++
++/* CDC NCM ch. 5.3 describes alternate setting 0 as having no
++ * endpoints and therefore not allowing any networking traffic. */
++#define	CDC_NCM_ALTSETTING_DISABLED	0
++/* CDC NCM ch. 5.3 describes alternate setting 1 as having the
++ * required bulk endpoints for normal operation. */
++#define	CDC_NCM_ALTSETTING_ENABLED	1
++
++struct cdc_ncm_data {
++	struct usb_cdc_ncm_nth16 nth16;
++	struct usb_cdc_ncm_ndp16 ndp16;
++	struct usb_cdc_ncm_dpe16 dpe16[CDC_NCM_DPT_DATAGRAMS_MAX + 1];
++};
++
++struct cdc_ncm_ctx {
++	struct cdc_ncm_data rx_ncm;
++	struct cdc_ncm_data tx_ncm;
++	struct usb_cdc_ncm_ntb_parameters ncm_parm;
++	struct timer_list tx_timer;
++
++	const struct usb_cdc_ncm_desc *func_desc;
++	const struct usb_cdc_header_desc *header_desc;
++	const struct usb_cdc_union_desc *union_desc;
++	const struct usb_cdc_ether_desc *ether_desc;
++
++	struct net_device *netdev;
++	struct usb_device *udev;
++	struct usb_host_endpoint *in_ep;
++	struct usb_host_endpoint *out_ep;
++	struct usb_host_endpoint *status_ep;
++	struct usb_interface *intf;
++	struct usb_interface *control;
++	struct usb_interface *data;
++
++	struct sk_buff *tx_curr_skb;
++	struct sk_buff *tx_rem_skb;
++
++	spinlock_t mtx;
++
++	u32 tx_timer_pending;
++	u32 tx_curr_offset;
++	u32 tx_curr_last_offset;
++	u32 tx_curr_frame_num;
++	u32 rx_speed;
++	u32 tx_speed;
++	u32 rx_max;
++	u32 tx_max;
++	u32 max_datagram_size;
++	u16 tx_max_datagrams;
++	u16 tx_remainder;
++	u16 tx_modulus;
++	u16 tx_ndp_modulus;
++	u16 tx_seq;
++	u16 connected;
++};
++
++static void cdc_ncm_tx_timeout(unsigned long arg);
++static const struct driver_info cdc_ncm_info;
++static struct usb_driver cdc_ncm_driver;
++static struct ethtool_ops cdc_ncm_ethtool_ops;
++
++static const struct usb_device_id cdc_devs[] = {
++	{ USB_INTERFACE_INFO(USB_CLASS_COMM,
++		USB_CDC_SUBCLASS_NCM, USB_CDC_PROTO_NONE),
++		.driver_info = (unsigned long)&cdc_ncm_info,
++	},
++	{
++	},
++};
++
++MODULE_DEVICE_TABLE(usb, cdc_devs);
++
++static void
++cdc_ncm_get_drvinfo(struct net_device *net, struct ethtool_drvinfo *info)
++{
++	struct usbnet *dev = netdev_priv(net);
++
++	strncpy(info->driver, dev->driver_name, sizeof(info->driver));
++	strncpy(info->version, DRIVER_VERSION, sizeof(info->version));
++	strncpy(info->fw_version, dev->driver_info->description,
++		sizeof(info->fw_version));
++	usb_make_path(dev->udev, info->bus_info, sizeof(info->bus_info));
++}
++
++static int
++cdc_ncm_do_request(struct cdc_ncm_ctx *ctx, struct usb_cdc_notification *req,
++		   void *data, u16 flags, u16 *actlen, u16 timeout)
++{
++	int err;
++
++	err = usb_control_msg(ctx->udev, (req->bmRequestType & USB_DIR_IN) ?
++				usb_rcvctrlpipe(ctx->udev, 0) :
++				usb_sndctrlpipe(ctx->udev, 0),
++				req->bNotificationType, req->bmRequestType,
++				req->wValue,
++				req->wIndex, data,
++				req->wLength, timeout);
++
++	if (err < 0) {
++		if (actlen)
++			*actlen = 0;
++		return err;
++	}
++
++	if (actlen)
++		*actlen = err;
++
++	return 0;
++}
++
++static u8 cdc_ncm_setup(struct cdc_ncm_ctx *ctx)
++{
++	struct usb_cdc_notification req;
++	u32 val;
++	u8 flags;
++	u8 iface_no;
++	int err;
++	u16 ntb_fmt_supported;
++
++	iface_no = ctx->control->cur_altsetting->desc.bInterfaceNumber;
++
++	req.bmRequestType = USB_TYPE_CLASS | USB_DIR_IN | USB_RECIP_INTERFACE;
++	req.bNotificationType = USB_CDC_GET_NTB_PARAMETERS;
++	req.wValue = 0;
++	req.wIndex = cpu_to_le16(iface_no);
++	req.wLength = cpu_to_le16(sizeof(ctx->ncm_parm));
++
++	err = cdc_ncm_do_request(ctx, &req, &ctx->ncm_parm, 0, NULL, 1000);
++	if (err) {
++		pr_debug("failed GET_NTB_PARAMETERS\n");
++		return 1;
++	}
++
++	/* read correct set of parameters according to device mode */
++	ctx->rx_max = le32_to_cpu(ctx->ncm_parm.dwNtbInMaxSize);
++	ctx->tx_max = le32_to_cpu(ctx->ncm_parm.dwNtbOutMaxSize);
++	ctx->tx_remainder = le16_to_cpu(ctx->ncm_parm.wNdpOutPayloadRemainder);
++	ctx->tx_modulus = le16_to_cpu(ctx->ncm_parm.wNdpOutDivisor);
++	ctx->tx_ndp_modulus = le16_to_cpu(ctx->ncm_parm.wNdpOutAlignment);
++	/* devices prior to NCM Errata shall set this field to zero */
++	ctx->tx_max_datagrams = le16_to_cpu(ctx->ncm_parm.wNtbOutMaxDatagrams);
++	ntb_fmt_supported = le16_to_cpu(ctx->ncm_parm.bmNtbFormatsSupported);
++
++	if (ctx->func_desc != NULL)
++		flags = ctx->func_desc->bmNetworkCapabilities;
++	else
++		flags = 0;
++
++	pr_debug("dwNtbInMaxSize=%u dwNtbOutMaxSize=%u "
++		 "wNdpOutPayloadRemainder=%u wNdpOutDivisor=%u "
++		 "wNdpOutAlignment=%u wNtbOutMaxDatagrams=%u flags=0x%x\n",
++		 ctx->rx_max, ctx->tx_max, ctx->tx_remainder, ctx->tx_modulus,
++		 ctx->tx_ndp_modulus, ctx->tx_max_datagrams, flags);
++
++	/* max count of tx datagrams */
++	if ((ctx->tx_max_datagrams == 0) ||
++			(ctx->tx_max_datagrams > CDC_NCM_DPT_DATAGRAMS_MAX))
++		ctx->tx_max_datagrams = CDC_NCM_DPT_DATAGRAMS_MAX;
++
++	/* verify maximum size of received NTB in bytes */
++	if (ctx->rx_max < USB_CDC_NCM_NTB_MIN_IN_SIZE) {
++		pr_debug("Using min receive length=%d\n",
++						USB_CDC_NCM_NTB_MIN_IN_SIZE);
++		ctx->rx_max = USB_CDC_NCM_NTB_MIN_IN_SIZE;
++	}
++
++	if (ctx->rx_max > CDC_NCM_NTB_MAX_SIZE_RX) {
++		pr_debug("Using default maximum receive length=%d\n",
++						CDC_NCM_NTB_MAX_SIZE_RX);
++		ctx->rx_max = CDC_NCM_NTB_MAX_SIZE_RX;
++	}
++
++	/* inform device about NTB input size changes */
++	if (ctx->rx_max != le32_to_cpu(ctx->ncm_parm.dwNtbInMaxSize)) {
++		req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT |
++							USB_RECIP_INTERFACE;
++		req.bNotificationType = USB_CDC_SET_NTB_INPUT_SIZE;
++		req.wValue = 0;
++		req.wIndex = cpu_to_le16(iface_no);
++
++		if (flags & USB_CDC_NCM_NCAP_NTB_INPUT_SIZE) {
++			struct usb_cdc_ncm_ndp_input_size ndp_in_sz;
++
++			req.wLength = 8;
++			ndp_in_sz.dwNtbInMaxSize = cpu_to_le32(ctx->rx_max);
++			ndp_in_sz.wNtbInMaxDatagrams =
++					cpu_to_le16(CDC_NCM_DPT_DATAGRAMS_MAX);
++			ndp_in_sz.wReserved = 0;
++			err = cdc_ncm_do_request(ctx, &req, &ndp_in_sz, 0, NULL,
++									1000);
++		} else {
++			__le32 dwNtbInMaxSize = cpu_to_le32(ctx->rx_max);
++
++			req.wLength = 4;
++			err = cdc_ncm_do_request(ctx, &req, &dwNtbInMaxSize, 0,
++								NULL, 1000);
++		}
++
++		if (err)
++			pr_debug("Setting NTB Input Size failed\n");
++	}
++
++	/* verify maximum size of transmitted NTB in bytes */
++	if ((ctx->tx_max <
++	    (CDC_NCM_MIN_HDR_SIZE + CDC_NCM_MIN_DATAGRAM_SIZE)) ||
++	    (ctx->tx_max > CDC_NCM_NTB_MAX_SIZE_TX)) {
++		pr_debug("Using default maximum transmit length=%d\n",
++						CDC_NCM_NTB_MAX_SIZE_TX);
++		ctx->tx_max = CDC_NCM_NTB_MAX_SIZE_TX;
++	}
++
++	/*
++	 * verify that the structure alignment is:
++	 * - power of two
++	 * - not greater than the maximum transmit length
++	 * - not less than four bytes
++	 */
++	val = ctx->tx_ndp_modulus;
++
++	if ((val < USB_CDC_NCM_NDP_ALIGN_MIN_SIZE) ||
++	    (val != ((-val) & val)) || (val >= ctx->tx_max)) {
++		pr_debug("Using default alignment: 4 bytes\n");
++		ctx->tx_ndp_modulus = USB_CDC_NCM_NDP_ALIGN_MIN_SIZE;
++	}
++
++	/*
++	 * verify that the payload alignment is:
++	 * - power of two
++	 * - not greater than the maximum transmit length
++	 * - not less than four bytes
++	 */
++	val = ctx->tx_modulus;
++
++	if ((val < USB_CDC_NCM_NDP_ALIGN_MIN_SIZE) ||
++	    (val != ((-val) & val)) || (val >= ctx->tx_max)) {
++		pr_debug("Using default transmit modulus: 4 bytes\n");
++		ctx->tx_modulus = USB_CDC_NCM_NDP_ALIGN_MIN_SIZE;
++	}
++
++	/* verify the payload remainder */
++	if (ctx->tx_remainder >= ctx->tx_modulus) {
++		pr_debug("Using default transmit remainder: 0 bytes\n");
++		ctx->tx_remainder = 0;
++	}
++
++	/* adjust TX-remainder according to NCM specification. */
++	ctx->tx_remainder = ((ctx->tx_remainder - ETH_HLEN) &
++						(ctx->tx_modulus - 1));
++
++	/* additional configuration */
++
++	/* set CRC Mode */
++	if (flags & USB_CDC_NCM_NCAP_CRC_MODE) {
++		req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT |
++							USB_RECIP_INTERFACE;
++		req.bNotificationType = USB_CDC_SET_CRC_MODE;
++		req.wValue = cpu_to_le16(USB_CDC_NCM_CRC_NOT_APPENDED);
++		req.wIndex = cpu_to_le16(iface_no);
++		req.wLength = 0;
++
++		err = cdc_ncm_do_request(ctx, &req, NULL, 0, NULL, 1000);
++		if (err)
++			pr_debug("Setting CRC mode off failed\n");
++	}
++
++	/* set NTB format, if both formats are supported */
++	if (ntb_fmt_supported & USB_CDC_NCM_NTH32_SIGN) {
++		req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT |
++							USB_RECIP_INTERFACE;
++		req.bNotificationType = USB_CDC_SET_NTB_FORMAT;
++		req.wValue = cpu_to_le16(USB_CDC_NCM_NTB16_FORMAT);
++		req.wIndex = cpu_to_le16(iface_no);
++		req.wLength = 0;
++
++		err = cdc_ncm_do_request(ctx, &req, NULL, 0, NULL, 1000);
++		if (err)
++			pr_debug("Setting NTB format to 16-bit failed\n");
++	}
++
++	ctx->max_datagram_size = CDC_NCM_MIN_DATAGRAM_SIZE;
++
++	/* set Max Datagram Size (MTU) */
++	if (flags & USB_CDC_NCM_NCAP_MAX_DATAGRAM_SIZE) {
++		__le16 max_datagram_size;
++		u16 eth_max_sz = le16_to_cpu(ctx->ether_desc->wMaxSegmentSize);
++
++		req.bmRequestType = USB_TYPE_CLASS | USB_DIR_IN |
++							USB_RECIP_INTERFACE;
++		req.bNotificationType = USB_CDC_GET_MAX_DATAGRAM_SIZE;
++		req.wValue = 0;
++		req.wIndex = cpu_to_le16(iface_no);
++		req.wLength = cpu_to_le16(2);
++
++		err = cdc_ncm_do_request(ctx, &req, &max_datagram_size, 0, NULL,
++									1000);
++		if (err) {
++			pr_debug("GET_MAX_DATAGRAM_SIZE failed, use size=%u\n",
++						CDC_NCM_MIN_DATAGRAM_SIZE);
++		} else {
++			ctx->max_datagram_size = le16_to_cpu(max_datagram_size);
++			/* Check Eth descriptor value */
++			if (eth_max_sz < CDC_NCM_MAX_DATAGRAM_SIZE) {
++				if (ctx->max_datagram_size > eth_max_sz)
++					ctx->max_datagram_size = eth_max_sz;
++			} else {
++				if (ctx->max_datagram_size >
++						CDC_NCM_MAX_DATAGRAM_SIZE)
++					ctx->max_datagram_size =
++						CDC_NCM_MAX_DATAGRAM_SIZE;
++			}
++
++			if (ctx->max_datagram_size < CDC_NCM_MIN_DATAGRAM_SIZE)
++				ctx->max_datagram_size =
++					CDC_NCM_MIN_DATAGRAM_SIZE;
++
++			/* if value changed, update device */
++			req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT |
++							USB_RECIP_INTERFACE;
++			req.bNotificationType = USB_CDC_SET_MAX_DATAGRAM_SIZE;
++			req.wValue = 0;
++			req.wIndex = cpu_to_le16(iface_no);
++			req.wLength = 2;
++			max_datagram_size = cpu_to_le16(ctx->max_datagram_size);
++
++			err = cdc_ncm_do_request(ctx, &req, &max_datagram_size,
++								0, NULL, 1000);
++			if (err)
++				pr_debug("SET_MAX_DATAGRAM_SIZE failed\n");
++		}
++
++	}
++
++	if (ctx->netdev->mtu != (ctx->max_datagram_size - ETH_HLEN))
++		ctx->netdev->mtu = ctx->max_datagram_size - ETH_HLEN;
++
++	return 0;
++}
++
++static void
++cdc_ncm_find_endpoints(struct cdc_ncm_ctx *ctx, struct usb_host_interface *intf)
++{
++	struct usb_host_endpoint *e;
++	u8 ep;
++
++	for (ep = 0; ep < intf->desc.bNumEndpoints; ep++) {
++
++		e = intf->endpoint + ep;
++		switch (e->desc.bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) {
++		case USB_ENDPOINT_XFER_INT:
++			if (usb_endpoint_dir_in(&e->desc)) {
++				if (ctx->status_ep == NULL)
++					ctx->status_ep = e;
++			}
++			break;
++
++		case USB_ENDPOINT_XFER_BULK:
++			if (usb_endpoint_dir_in(&e->desc)) {
++				if (ctx->in_ep == NULL)
++					ctx->in_ep = e;
++			} else {
++				if (ctx->out_ep == NULL)
++					ctx->out_ep = e;
++			}
++			break;
++
++		default:
++			break;
++		}
++	}
++}
++
++static void cdc_ncm_free(struct cdc_ncm_ctx *ctx)
++{
++	if (ctx == NULL)
++		return;
++
++	del_timer_sync(&ctx->tx_timer);
++
++	if (ctx->tx_rem_skb != NULL) {
++		dev_kfree_skb_any(ctx->tx_rem_skb);
++		ctx->tx_rem_skb = NULL;
++	}
++
++	if (ctx->tx_curr_skb != NULL) {
++		dev_kfree_skb_any(ctx->tx_curr_skb);
++		ctx->tx_curr_skb = NULL;
++	}
++
++	kfree(ctx);
++}
++
++static int cdc_ncm_bind(struct usbnet *dev, struct usb_interface *intf)
++{
++	struct cdc_ncm_ctx *ctx;
++	struct usb_driver *driver;
++	struct usb_host_interface *data_altsetting;
++	u8 *buf;
++	int len;
++	int temp;
++	u8 iface_no;
++
++	ctx = kmalloc(sizeof(*ctx), GFP_KERNEL);
++	if (ctx == NULL)
++		return -ENODEV;
++
++	memset(ctx, 0, sizeof(*ctx));
++
++	init_timer(&ctx->tx_timer);
++	spin_lock_init(&ctx->mtx);
++	ctx->netdev = dev->net;
++
++	/* store ctx pointer in device data field */
++	dev->data[0] = (unsigned long)ctx;
++
++	/* get some pointers */
++	driver = driver_of(intf);
++	buf = intf->cur_altsetting->extra;
++	len = intf->cur_altsetting->extralen;
++
++	ctx->udev = dev->udev;
++	ctx->intf = intf;
++
++	/* parse through descriptors associated with control interface */
++	while ((len > 0) && (buf[0] > 2) && (buf[0] <= len)) {
++
++		if (buf[1] != USB_DT_CS_INTERFACE)
++			goto advance;
++
++		switch (buf[2]) {
++		case USB_CDC_UNION_TYPE:
++			if (buf[0] < sizeof(*(ctx->union_desc)))
++				break;
++
++			ctx->union_desc =
++					(const struct usb_cdc_union_desc *)buf;
++
++			ctx->control = usb_ifnum_to_if(dev->udev,
++					ctx->union_desc->bMasterInterface0);
++			ctx->data = usb_ifnum_to_if(dev->udev,
++					ctx->union_desc->bSlaveInterface0);
++			break;
++
++		case USB_CDC_ETHERNET_TYPE:
++			if (buf[0] < sizeof(*(ctx->ether_desc)))
++				break;
++
++			ctx->ether_desc =
++					(const struct usb_cdc_ether_desc *)buf;
++			dev->hard_mtu =
++				le16_to_cpu(ctx->ether_desc->wMaxSegmentSize);
++
++			if (dev->hard_mtu < CDC_NCM_MIN_DATAGRAM_SIZE)
++				dev->hard_mtu =	CDC_NCM_MIN_DATAGRAM_SIZE;
++			else if (dev->hard_mtu > CDC_NCM_MAX_DATAGRAM_SIZE)
++				dev->hard_mtu =	CDC_NCM_MAX_DATAGRAM_SIZE;
++			break;
++
++		case USB_CDC_NCM_TYPE:
++			if (buf[0] < sizeof(*(ctx->func_desc)))
++				break;
++
++			ctx->func_desc = (const struct usb_cdc_ncm_desc *)buf;
++			break;
++
++		default:
++			break;
++		}
++advance:
++		/* advance to next descriptor */
++		temp = buf[0];
++		buf += temp;
++		len -= temp;
++	}
++
++	/* check if we got everything */
++	if ((ctx->control == NULL) || (ctx->data == NULL) ||
++	    (ctx->ether_desc == NULL) || (ctx->control != intf))
++		goto error;
++
++	/* claim interfaces, if any */
++	temp = usb_driver_claim_interface(driver, ctx->data, dev);
++	if (temp)
++		goto error;
++
++	iface_no = ctx->data->cur_altsetting->desc.bInterfaceNumber;
++
++	/* reset data interface */
++	temp = usb_set_interface(dev->udev, iface_no, CDC_NCM_ALTSETTING_DISABLED);
++	if (temp)
++		goto error2;
++
++	/* initialize data interface */
++	if (cdc_ncm_setup(ctx))
++		goto error2;
++
++	/* find the data interface altsetting */
++	data_altsetting =
++		usb_altnum_to_altsetting(ctx->data, CDC_NCM_ALTSETTING_ENABLED);
++	if (data_altsetting == NULL)
++		goto error2;
++
++	cdc_ncm_find_endpoints(ctx, data_altsetting);
++	cdc_ncm_find_endpoints(ctx, ctx->control->cur_altsetting);
++
++	if ((ctx->in_ep == NULL) || (ctx->out_ep == NULL) ||
++	    (ctx->status_ep == NULL))
++		goto error2;
++
++	dev->net->ethtool_ops = &cdc_ncm_ethtool_ops;
++
++	usb_set_intfdata(ctx->data, dev);
++	usb_set_intfdata(ctx->control, dev);
++	usb_set_intfdata(ctx->intf, dev);
++
++	temp = usbnet_get_ethernet_addr(dev, ctx->ether_desc->iMACAddress);
++	if (temp)
++		goto error2;
++
++	dev_info(&dev->udev->dev, "MAC-Address: "
++				"0x%02x:0x%02x:0x%02x:0x%02x:0x%02x:0x%02x\n",
++				dev->net->dev_addr[0], dev->net->dev_addr[1],
++				dev->net->dev_addr[2], dev->net->dev_addr[3],
++				dev->net->dev_addr[4], dev->net->dev_addr[5]);
++
++	dev->in = usb_rcvbulkpipe(dev->udev,
++		ctx->in_ep->desc.bEndpointAddress & USB_ENDPOINT_NUMBER_MASK);
++	dev->out = usb_sndbulkpipe(dev->udev,
++		ctx->out_ep->desc.bEndpointAddress & USB_ENDPOINT_NUMBER_MASK);
++	dev->status = ctx->status_ep;
++	dev->rx_urb_size = ctx->rx_max;
++	dev->maxpacket = le16_to_cpu(ctx->out_ep->desc.wMaxPacketSize);
++
++	/*
++	 * We should get an event when network connection is "connected" or
++	 * "disconnected". Set network connection in "disconnected" state
++	 * (carrier is OFF) during attach, so the IP network stack does not
++	 * start IPv6 negotiation and more.
++	 */
++	netif_carrier_off(dev->net);
++	ctx->tx_speed = ctx->rx_speed = 0;
++	return 0;
++
++error2:
++	usb_set_intfdata(ctx->control, NULL);
++	usb_set_intfdata(ctx->data, NULL);
++	usb_driver_release_interface(driver, ctx->data);
++error:
++	cdc_ncm_free((struct cdc_ncm_ctx *)dev->data[0]);
++	dev->data[0] = 0;
++	dev_info(&dev->udev->dev, "bind() failure\n");
++	return -ENODEV;
++}
++
++static void cdc_ncm_unbind(struct usbnet *dev, struct usb_interface *intf)
++{
++	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)dev->data[0];
++	struct usb_driver *driver = driver_of(intf);
++
++	if (ctx == NULL)
++		return;		/* no setup */
++
++	/* disconnect master --> disconnect slave */
++	if (intf == ctx->control && ctx->data) {
++		usb_set_intfdata(ctx->data, NULL);
++		usb_driver_release_interface(driver, ctx->data);
++		ctx->data = NULL;
++
++	} else if (intf == ctx->data && ctx->control) {
++		usb_set_intfdata(ctx->control, NULL);
++		usb_driver_release_interface(driver, ctx->control);
++		ctx->control = NULL;
++	}
++
++	usb_set_intfdata(ctx->intf, NULL);
++	cdc_ncm_free(ctx);
++}
++
++static void cdc_ncm_zero_fill(u8 *ptr, u32 first, u32 end, u32 max)
++{
++	if (first >= max)
++		return;
++	if (first >= end)
++		return;
++	if (end > max)
++		end = max;
++	memset(ptr + first, 0, end - first);
++}
++
++static struct sk_buff *
++cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
++{
++	struct sk_buff *skb_out;
++	u32 rem;
++	u32 offset;
++	u32 last_offset;
++	u16 n = 0;
++	u8 ready2send = 0;
++
++	/* if there is a remaining skb, it gets priority */
++	if (skb != NULL)
++		swap(skb, ctx->tx_rem_skb);
++	else
++		ready2send = 1;
++
++	/*
++	 * +----------------+
++	 * | skb_out        |
++	 * +----------------+
++	 *           ^ offset
++	 *        ^ last_offset
++	 */
++
++	/* check if we are resuming an OUT skb */
++	if (ctx->tx_curr_skb != NULL) {
++		/* pop variables */
++		skb_out = ctx->tx_curr_skb;
++		offset = ctx->tx_curr_offset;
++		last_offset = ctx->tx_curr_last_offset;
++		n = ctx->tx_curr_frame_num;
++
++	} else {
++		/* reset variables */
++		skb_out = alloc_skb((ctx->tx_max + 1), GFP_ATOMIC);
++		if (skb_out == NULL) {
++			if (skb != NULL) {
++				dev_kfree_skb_any(skb);
++				ctx->netdev->stats.tx_dropped++;
++			}
++			goto exit_no_skb;
++		}
++
++		/* make room for NTH and NDP */
++		offset = ALIGN(sizeof(struct usb_cdc_ncm_nth16),
++					ctx->tx_ndp_modulus) +
++					sizeof(struct usb_cdc_ncm_ndp16) +
++					(ctx->tx_max_datagrams + 1) *
++					sizeof(struct usb_cdc_ncm_dpe16);
++
++		/* store last valid offset before alignment */
++		last_offset = offset;
++		/* align first Datagram offset correctly */
++		offset = ALIGN(offset, ctx->tx_modulus) + ctx->tx_remainder;
++		/* zero buffer till the first IP datagram */
++		cdc_ncm_zero_fill(skb_out->data, 0, offset, offset);
++		n = 0;
++		ctx->tx_curr_frame_num = 0;
++	}
++
++	for (; n < ctx->tx_max_datagrams; n++) {
++		/* check if end of transmit buffer is reached */
++		if (offset >= ctx->tx_max) {
++			ready2send = 1;
++			break;
++		}
++		/* compute maximum buffer size */
++		rem = ctx->tx_max - offset;
++
++		if (skb == NULL) {
++			skb = ctx->tx_rem_skb;
++			ctx->tx_rem_skb = NULL;
++
++			/* check for end of skb */
++			if (skb == NULL)
++				break;
++		}
++
++		if (skb->len > rem) {
++			if (n == 0) {
++				/* won't fit, MTU problem? */
++				dev_kfree_skb_any(skb);
++				skb = NULL;
++				ctx->netdev->stats.tx_dropped++;
++			} else {
++				/* no room for skb - store for later */
++				if (ctx->tx_rem_skb != NULL) {
++					dev_kfree_skb_any(ctx->tx_rem_skb);
++					ctx->netdev->stats.tx_dropped++;
++				}
++				ctx->tx_rem_skb = skb;
++				skb = NULL;
++				ready2send = 1;
++			}
++			break;
++		}
++
++		memcpy(((u8 *)skb_out->data) + offset, skb->data, skb->len);
++
++		ctx->tx_ncm.dpe16[n].wDatagramLength = cpu_to_le16(skb->len);
++		ctx->tx_ncm.dpe16[n].wDatagramIndex = cpu_to_le16(offset);
++
++		/* update offset */
++		offset += skb->len;
++
++		/* store last valid offset before alignment */
++		last_offset = offset;
++
++		/* align offset correctly */
++		offset = ALIGN(offset, ctx->tx_modulus) + ctx->tx_remainder;
++
++		/* zero padding */
++		cdc_ncm_zero_fill(skb_out->data, last_offset, offset,
++								ctx->tx_max);
++		dev_kfree_skb_any(skb);
++		skb = NULL;
++	}
++
++	/* free up any dangling skb */
++	if (skb != NULL) {
++		dev_kfree_skb_any(skb);
++		skb = NULL;
++		ctx->netdev->stats.tx_dropped++;
++	}
++
++	ctx->tx_curr_frame_num = n;
++
++	if (n == 0) {
++		/* wait for more frames */
++		/* push variables */
++		ctx->tx_curr_skb = skb_out;
++		ctx->tx_curr_offset = offset;
++		ctx->tx_curr_last_offset = last_offset;
++		goto exit_no_skb;
++
++	} else if ((n < ctx->tx_max_datagrams) && (ready2send == 0)) {
++		/* wait for more frames */
++		/* push variables */
++		ctx->tx_curr_skb = skb_out;
++		ctx->tx_curr_offset = offset;
++		ctx->tx_curr_last_offset = last_offset;
++		/* set the pending count */
++		if (n < CDC_NCM_RESTART_TIMER_DATAGRAM_CNT)
++			ctx->tx_timer_pending = 2;
++		goto exit_no_skb;
++
++	} else {
++		/* frame goes out */
++		/* variables will be reset at next call */
++	}
++
++	/* check for overflow */
++	if (last_offset > ctx->tx_max)
++		last_offset = ctx->tx_max;
++
++	/* revert offset */
++	offset = last_offset;
++
++	/*
++	 * If collected data size is less or equal CDC_NCM_MIN_TX_PKT bytes,
++	 * we send buffers as it is. If we get more data, it would be more
++	 * efficient for USB HS mobile device with DMA engine to receive a full
++	 * size NTB, than canceling DMA transfer and receiving a short packet.
++	 */
++	if (offset > CDC_NCM_MIN_TX_PKT)
++		offset = ctx->tx_max;
++
++	/* final zero padding */
++	cdc_ncm_zero_fill(skb_out->data, last_offset, offset, ctx->tx_max);
++
++	/* store last offset */
++	last_offset = offset;
++
++	if (((last_offset < ctx->tx_max) && ((last_offset %
++			le16_to_cpu(ctx->out_ep->desc.wMaxPacketSize)) == 0)) ||
++	    (((last_offset == ctx->tx_max) && ((ctx->tx_max %
++		le16_to_cpu(ctx->out_ep->desc.wMaxPacketSize)) == 0)) &&
++		(ctx->tx_max < le32_to_cpu(ctx->ncm_parm.dwNtbOutMaxSize)))) {
++		/* force short packet */
++		*(((u8 *)skb_out->data) + last_offset) = 0;
++		last_offset++;
++	}
++
++	/* zero the rest of the DPEs plus the last NULL entry */
++	for (; n <= CDC_NCM_DPT_DATAGRAMS_MAX; n++) {
++		ctx->tx_ncm.dpe16[n].wDatagramLength = 0;
++		ctx->tx_ncm.dpe16[n].wDatagramIndex = 0;
++	}
++
++	/* fill out 16-bit NTB header */
++	ctx->tx_ncm.nth16.dwSignature = cpu_to_le32(USB_CDC_NCM_NTH16_SIGN);
++	ctx->tx_ncm.nth16.wHeaderLength =
++					cpu_to_le16(sizeof(ctx->tx_ncm.nth16));
++	ctx->tx_ncm.nth16.wSequence = cpu_to_le16(ctx->tx_seq);
++	ctx->tx_ncm.nth16.wBlockLength = cpu_to_le16(last_offset);
++	ctx->tx_ncm.nth16.wNdpIndex = ALIGN(sizeof(struct usb_cdc_ncm_nth16),
++							ctx->tx_ndp_modulus);
++
++	memcpy(skb_out->data, &(ctx->tx_ncm.nth16), sizeof(ctx->tx_ncm.nth16));
++	ctx->tx_seq++;
++
++	/* fill out 16-bit NDP table */
++	ctx->tx_ncm.ndp16.dwSignature =
++				cpu_to_le32(USB_CDC_NCM_NDP16_NOCRC_SIGN);
++	rem = sizeof(ctx->tx_ncm.ndp16) + ((ctx->tx_curr_frame_num + 1) *
++					sizeof(struct usb_cdc_ncm_dpe16));
++	ctx->tx_ncm.ndp16.wLength = cpu_to_le16(rem);
++	ctx->tx_ncm.ndp16.wNextNdpIndex = 0; /* reserved */
++
++	memcpy(((u8 *)skb_out->data) + ctx->tx_ncm.nth16.wNdpIndex,
++						&(ctx->tx_ncm.ndp16),
++						sizeof(ctx->tx_ncm.ndp16));
++
++	memcpy(((u8 *)skb_out->data) + ctx->tx_ncm.nth16.wNdpIndex +
++					sizeof(ctx->tx_ncm.ndp16),
++					&(ctx->tx_ncm.dpe16),
++					(ctx->tx_curr_frame_num + 1) *
++					sizeof(struct usb_cdc_ncm_dpe16));
++
++	/* set frame length */
++	skb_put(skb_out, last_offset);
++
++	/* return skb */
++	ctx->tx_curr_skb = NULL;
++	return skb_out;
++
++exit_no_skb:
++	return NULL;
++}
++
++static void cdc_ncm_tx_timeout_start(struct cdc_ncm_ctx *ctx)
++{
++	/* start timer, if not already started */
++	if (timer_pending(&ctx->tx_timer) == 0) {
++		ctx->tx_timer.function = &cdc_ncm_tx_timeout;
++		ctx->tx_timer.data = (unsigned long)ctx;
++		ctx->tx_timer.expires = jiffies + ((HZ + 999) / 1000);
++		add_timer(&ctx->tx_timer);
++	}
++}
++
++static void cdc_ncm_tx_timeout(unsigned long arg)
++{
++	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)arg;
++	u8 restart;
++
++	spin_lock(&ctx->mtx);
++	if (ctx->tx_timer_pending != 0) {
++		ctx->tx_timer_pending--;
++		restart = 1;
++	} else {
++		restart = 0;
++	}
++
++	spin_unlock(&ctx->mtx);
++
++	if (restart) {
++		spin_lock(&ctx->mtx);
++		cdc_ncm_tx_timeout_start(ctx);
++		spin_unlock(&ctx->mtx);
++	} else if (ctx->netdev != NULL) {
++		usbnet_start_xmit(NULL, ctx->netdev);
++	}
++}
++
++static struct sk_buff *
++cdc_ncm_tx_fixup(struct usbnet *dev, struct sk_buff *skb, gfp_t flags)
++{
++	struct sk_buff *skb_out;
++	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)dev->data[0];
++	u8 need_timer = 0;
++
++	/*
++	 * The Ethernet API we are using does not support transmitting
++	 * multiple Ethernet frames in a single call. This driver will
++	 * accumulate multiple Ethernet frames and send out a larger
++	 * USB frame when the USB buffer is full or when a single jiffies
++	 * timeout happens.
++	 */
++	if (ctx == NULL)
++		goto error;
++
++	spin_lock(&ctx->mtx);
++	skb_out = cdc_ncm_fill_tx_frame(ctx, skb);
++	if (ctx->tx_curr_skb != NULL)
++		need_timer = 1;
++
++	/* Start timer, if there is a remaining skb */
++	if (need_timer)
++		cdc_ncm_tx_timeout_start(ctx);
++
++	if (skb_out)
++		dev->net->stats.tx_packets += ctx->tx_curr_frame_num;
++
++	spin_unlock(&ctx->mtx);
++	return skb_out;
++
++error:
++	if (skb != NULL)
++		dev_kfree_skb_any(skb);
++
++	return NULL;
++}
++
++static int cdc_ncm_rx_fixup(struct usbnet *dev, struct sk_buff *skb_in)
++{
++	struct sk_buff *skb;
++	struct cdc_ncm_ctx *ctx;
++	int sumlen;
++	int actlen;
++	int temp;
++	int nframes;
++	int x;
++	int offset;
++
++	ctx = (struct cdc_ncm_ctx *)dev->data[0];
++	if (ctx == NULL)
++		goto error;
++
++	actlen = skb_in->len;
++	sumlen = CDC_NCM_NTB_MAX_SIZE_RX;
++
++	if (actlen < (sizeof(ctx->rx_ncm.nth16) + sizeof(ctx->rx_ncm.ndp16))) {
++		pr_debug("frame too short\n");
++		goto error;
++	}
++
++	memcpy(&(ctx->rx_ncm.nth16), ((u8 *)skb_in->data),
++						sizeof(ctx->rx_ncm.nth16));
++
++	if (le32_to_cpu(ctx->rx_ncm.nth16.dwSignature) !=
++	    USB_CDC_NCM_NTH16_SIGN) {
++		pr_debug("invalid NTH16 signature <%u>\n",
++			 le32_to_cpu(ctx->rx_ncm.nth16.dwSignature));
++		goto error;
++	}
++
++	temp = le16_to_cpu(ctx->rx_ncm.nth16.wBlockLength);
++	if (temp > sumlen) {
++		pr_debug("unsupported NTB block length %u/%u\n", temp, sumlen);
++		goto error;
++	}
++
++	temp = le16_to_cpu(ctx->rx_ncm.nth16.wNdpIndex);
++	if ((temp + sizeof(ctx->rx_ncm.ndp16)) > actlen) {
++		pr_debug("invalid DPT16 index\n");
++		goto error;
++	}
++
++	memcpy(&(ctx->rx_ncm.ndp16), ((u8 *)skb_in->data) + temp,
++						sizeof(ctx->rx_ncm.ndp16));
++
++	if (le32_to_cpu(ctx->rx_ncm.ndp16.dwSignature) !=
++	    USB_CDC_NCM_NDP16_NOCRC_SIGN) {
++		pr_debug("invalid DPT16 signature <%u>\n",
++			 le32_to_cpu(ctx->rx_ncm.ndp16.dwSignature));
++		goto error;
++	}
++
++	if (le16_to_cpu(ctx->rx_ncm.ndp16.wLength) <
++	    USB_CDC_NCM_NDP16_LENGTH_MIN) {
++		pr_debug("invalid DPT16 length <%u>\n",
++			 le32_to_cpu(ctx->rx_ncm.ndp16.dwSignature));
++		goto error;
++	}
++
++	nframes = ((le16_to_cpu(ctx->rx_ncm.ndp16.wLength) -
++					sizeof(struct usb_cdc_ncm_ndp16)) /
++					sizeof(struct usb_cdc_ncm_dpe16));
++	nframes--; /* we process NDP entries except for the last one */
++
++	pr_debug("nframes = %u\n", nframes);
++
++	temp += sizeof(ctx->rx_ncm.ndp16);
++
++	if ((temp + nframes * (sizeof(struct usb_cdc_ncm_dpe16))) > actlen) {
++		pr_debug("Invalid nframes = %d\n", nframes);
++		goto error;
++	}
++
++	if (nframes > CDC_NCM_DPT_DATAGRAMS_MAX) {
++		pr_debug("Truncating number of frames from %u to %u\n",
++					nframes, CDC_NCM_DPT_DATAGRAMS_MAX);
++		nframes = CDC_NCM_DPT_DATAGRAMS_MAX;
++	}
++
++	memcpy(&(ctx->rx_ncm.dpe16), ((u8 *)skb_in->data) + temp,
++				nframes * (sizeof(struct usb_cdc_ncm_dpe16)));
++
++	for (x = 0; x < nframes; x++) {
++		offset = le16_to_cpu(ctx->rx_ncm.dpe16[x].wDatagramIndex);
++		temp = le16_to_cpu(ctx->rx_ncm.dpe16[x].wDatagramLength);
++
++		/*
++		 * CDC NCM ch. 3.7
++		 * All entries after first NULL entry are to be ignored
++		 */
++		if ((offset == 0) || (temp == 0)) {
++			if (!x)
++				goto error; /* empty NTB */
++			break;
++		}
++
++		/* sanity checking */
++		if (((offset + temp) > actlen) ||
++		    (temp > CDC_NCM_MAX_DATAGRAM_SIZE) || (temp < ETH_HLEN)) {
++			pr_debug("invalid frame detected (ignored)"
++					"offset[%u]=%u, length=%u, skb=%p\n",
++					x, offset, temp, skb_in);
++			if (!x)
++				goto error;
++			break;
++
++		} else {
++			skb = skb_clone(skb_in, GFP_ATOMIC);
++			if (!skb)
++				goto error;
++			skb->len = temp;
++			skb->data = ((u8 *)skb_in->data) + offset;
++			skb_set_tail_pointer(skb, temp);
++			usbnet_skb_return(dev, skb);
++		}
++	}
++	return 1;
++error:
++	return 0;
++}
++
++static int cdc_ncm_reset(struct usbnet *dev)
++{
++	struct cdc_ncm_ctx *ctx;
++	int temp;
++	u8 iface_no;
++
++	ctx = (struct cdc_ncm_ctx *)dev->data[0];
++	iface_no = ctx->data->cur_altsetting->desc.bInterfaceNumber;
++
++	/* configure data interface */
++	temp = usb_set_interface(dev->udev, iface_no, CDC_NCM_ALTSETTING_ENABLED);
++	if (temp)
++		return temp;
++
++	return 0;
++}
++
++static void
++cdc_ncm_speed_change(struct cdc_ncm_ctx *ctx,
++		     struct usb_cdc_speed_change *data)
++{
++	uint32_t rx_speed = le32_to_cpu(data->DLBitRRate);
++	uint32_t tx_speed = le32_to_cpu(data->ULBitRate);
++
++	/*
++	 * Currently the USB-NET API does not support reporting the actual
++	 * device speed. Do print it instead.
++	 */
++	if ((tx_speed != ctx->tx_speed) || (rx_speed != ctx->rx_speed)) {
++		ctx->tx_speed = tx_speed;
++		ctx->rx_speed = rx_speed;
++
++		if ((tx_speed > 1000000) && (rx_speed > 1000000)) {
++			printk(KERN_INFO KBUILD_MODNAME
++				": %s: %u mbit/s downlink "
++				"%u mbit/s uplink\n",
++				ctx->netdev->name,
++				(unsigned int)(rx_speed / 1000000U),
++				(unsigned int)(tx_speed / 1000000U));
++		} else {
++			printk(KERN_INFO KBUILD_MODNAME
++				": %s: %u kbit/s downlink "
++				"%u kbit/s uplink\n",
++				ctx->netdev->name,
++				(unsigned int)(rx_speed / 1000U),
++				(unsigned int)(tx_speed / 1000U));
++		}
++	}
++}
++
++static void cdc_ncm_status(struct usbnet *dev, struct urb *urb)
++{
++	struct cdc_ncm_ctx *ctx;
++	struct usb_cdc_notification *event;
++
++	ctx = (struct cdc_ncm_ctx *)dev->data[0];
++
++	if (urb->actual_length < sizeof(*event))
++		return;
++
++	/* test for split data in 8-byte chunks */
++	if (test_and_clear_bit(EVENT_STS_SPLIT, &dev->flags)) {
++		cdc_ncm_speed_change(ctx,
++		      (struct usb_cdc_speed_change *)urb->transfer_buffer);
++		return;
++	}
++
++	event = urb->transfer_buffer;
++
++	switch (event->bNotificationType) {
++	case USB_CDC_NOTIFY_NETWORK_CONNECTION:
++		/*
++		 * According to the CDC NCM specification ch.7.1
++		 * USB_CDC_NOTIFY_NETWORK_CONNECTION notification shall be
++		 * sent by device after USB_CDC_NOTIFY_SPEED_CHANGE.
++		 */
++		ctx->connected = event->wValue;
++
++		printk(KERN_INFO KBUILD_MODNAME ": %s: network connection:"
++			" %sconnected\n",
++			ctx->netdev->name, ctx->connected ? "" : "dis");
++
++		if (ctx->connected)
++			netif_carrier_on(dev->net);
++		else {
++			netif_carrier_off(dev->net);
++			ctx->tx_speed = ctx->rx_speed = 0;
++		}
++		break;
++
++	case USB_CDC_NOTIFY_SPEED_CHANGE:
++		if (urb->actual_length < (sizeof(*event) +
++					sizeof(struct usb_cdc_speed_change)))
++			set_bit(EVENT_STS_SPLIT, &dev->flags);
++		else
++			cdc_ncm_speed_change(ctx,
++				(struct usb_cdc_speed_change *) &event[1]);
++		break;
++
++	default:
++		dev_err(&dev->udev->dev, "NCM: unexpected "
++			"notification 0x%02x!\n", event->bNotificationType);
++		break;
++	}
++}
++
++static int cdc_ncm_check_connect(struct usbnet *dev)
++{
++	struct cdc_ncm_ctx *ctx;
++
++	ctx = (struct cdc_ncm_ctx *)dev->data[0];
++	if (ctx == NULL)
++		return 1;	/* disconnected */
++
++	return !ctx->connected;
++}
++
++static int
++cdc_ncm_probe(struct usb_interface *udev, const struct usb_device_id *prod)
++{
++	return usbnet_probe(udev, prod);
++}
++
++static void cdc_ncm_disconnect(struct usb_interface *intf)
++{
++	struct usbnet *dev = usb_get_intfdata(intf);
++
++	if (dev == NULL)
++		return;		/* already disconnected */
++
++	usbnet_disconnect(intf);
++}
++
++static int cdc_ncm_manage_power(struct usbnet *dev, int status)
++{
++	dev->intf->needs_remote_wakeup = status;
++	return 0;
++}
++
++static const struct driver_info cdc_ncm_info = {
++	.description = "CDC NCM",
++	.flags = FLAG_POINTTOPOINT | FLAG_NO_SETINT | FLAG_MULTI_PACKET,
++	.bind = cdc_ncm_bind,
++	.unbind = cdc_ncm_unbind,
++	.check_connect = cdc_ncm_check_connect,
++	.manage_power = cdc_ncm_manage_power,
++	.status = cdc_ncm_status,
++	.rx_fixup = cdc_ncm_rx_fixup,
++	.tx_fixup = cdc_ncm_tx_fixup,
++	.reset = cdc_ncm_reset,
++};
++
++static struct usb_driver cdc_ncm_driver = {
++	.name = "cdc_ncm",
++	.id_table = cdc_devs,
++	.probe = cdc_ncm_probe,
++	.disconnect = cdc_ncm_disconnect,
++	.suspend = usbnet_suspend,
++	.resume = usbnet_resume,
++	.reset_resume =	usbnet_resume,
++	.supports_autosuspend = 1,
++};
++
++static struct ethtool_ops cdc_ncm_ethtool_ops = {
++	.get_drvinfo = cdc_ncm_get_drvinfo,
++	.get_link = usbnet_get_link,
++	.get_msglevel = usbnet_get_msglevel,
++	.set_msglevel = usbnet_set_msglevel,
++	.get_settings = usbnet_get_settings,
++	.set_settings = usbnet_set_settings,
++	.nway_reset = usbnet_nway_reset,
++};
++
++static int __init cdc_ncm_init(void)
++{
++	printk(KERN_INFO KBUILD_MODNAME ": " DRIVER_VERSION "\n");
++	return usb_register(&cdc_ncm_driver);
++}
++
++module_init(cdc_ncm_init);
++
++static void __exit cdc_ncm_exit(void)
++{
++	usb_deregister(&cdc_ncm_driver);
++}
++
++module_exit(cdc_ncm_exit);
++
++MODULE_AUTHOR("Hans Petter Selasky");
++MODULE_DESCRIPTION("USB CDC NCM host driver");
++MODULE_LICENSE("Dual BSD/GPL");
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/Kconfig linux-2.6.35.3/drivers/net/usb/Kconfig
+--- linux-2.6.35.3.orig/drivers/net/usb/Kconfig	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/drivers/net/usb/Kconfig	2012-02-15 17:12:40.000000000 +0000
+@@ -196,6 +196,25 @@
+ 	  IEEE 802 "local assignment" bit is set in the address, a "usbX"
+ 	  name is used instead.
+ 
++config USB_NET_CDC_NCM
++	tristate "CDC NCM support"
++	depends on USB_USBNET
++	default y
++	help
++	  This driver provides support for CDC NCM (Network Control Model
++	  Device USB Class Specification). The CDC NCM specification is
++	  available from <http://www.usb.org/>.
++
++	  Say "y" to link the driver statically, or "m" to build a
++	  dynamically linked module.
++
++	  This driver should work with at least the following devices:
++	    * ST-Ericsson M700 LTE FDD/TDD Mobile Broadband Modem (ref. design)
++	    * ST-Ericsson M5730 HSPA+ Mobile Broadband Modem (reference design)
++	    * ST-Ericsson M570 HSPA+ Mobile Broadband Modem (reference design)
++	    * ST-Ericsson M343 HSPA Mobile Broadband Modem (reference design)
++	    * Ericsson F5521gw Mobile Broadband Module
++
+ config USB_NET_DM9601
+ 	tristate "Davicom DM9601 based USB 1.1 10/100 ethernet devices"
+ 	depends on USB_USBNET
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/Makefile linux-2.6.35.3/drivers/net/usb/Makefile
+--- linux-2.6.35.3.orig/drivers/net/usb/Makefile	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/drivers/net/usb/Makefile	2012-02-15 17:12:40.000000000 +0000
+@@ -25,4 +25,5 @@
+ obj-$(CONFIG_USB_CDC_PHONET)	+= cdc-phonet.o
+ obj-$(CONFIG_USB_IPHETH)	+= ipheth.o
+ obj-$(CONFIG_USB_SIERRA_NET)	+= sierra_net.o
++obj-$(CONFIG_USB_NET_CDC_NCM)	+= cdc_ncm.o
+ 
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbnet.c linux-2.6.35.3/drivers/net/usb/usbnet.c
+--- linux-2.6.35.3.orig/drivers/net/usb/usbnet.c	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/drivers/net/usb/usbnet.c	2012-02-15 17:12:40.000000000 +0000
+@@ -395,14 +395,21 @@
+ 		goto error;
+ 	// else network stack removes extra byte if we forced a short packet
+ 
+-	if (skb->len)
+-		usbnet_skb_return (dev, skb);
+-	else {
+-		netif_dbg(dev, rx_err, dev->net, "drop\n");
+-error:
+-		dev->net->stats.rx_errors++;
+-		skb_queue_tail (&dev->done, skb);
++	if (skb->len) {
++		/* all data was already cloned from skb inside the driver */
++		if (dev->driver_info->flags & FLAG_MULTI_PACKET)
++			dev_kfree_skb_any(skb);
++		else
++			usbnet_skb_return(dev, skb);
++
++		return;
+ 	}
++
++
++	netif_dbg(dev, rx_err, dev->net, "drop\n");
++error:
++	dev->net->stats.rx_errors++;
++	skb_queue_tail(&dev->done, skb);
+ }
+ 
+ /*-------------------------------------------------------------------------*/
+@@ -972,7 +979,8 @@
+ 	struct usbnet		*dev = entry->dev;
+ 
+ 	if (urb->status == 0) {
+-		dev->net->stats.tx_packets++;
++		if (!(dev->driver_info->flags & FLAG_MULTI_PACKET))
++			dev->net->stats.tx_packets++;
+ 		dev->net->stats.tx_bytes += entry->length;
+ 	} else {
+ 		dev->net->stats.tx_errors++;
+@@ -1045,8 +1053,13 @@
+ 	if (info->tx_fixup) {
+ 		skb = info->tx_fixup (dev, skb, GFP_ATOMIC);
+ 		if (!skb) {
+-			netif_dbg(dev, tx_err, dev->net, "can't tx_fixup skb\n");
+-			goto drop;
++			if (netif_msg_tx_err(dev)) {
++				netif_dbg(dev, tx_err, dev->net, "can't tx_fixup skb\n");
++				goto drop;
++			} else {
++				/* cdc_ncm collected packet; waits for more */
++				goto not_drop;
++			}
+ 		}
+ 	}
+ 	length = skb->len;
+@@ -1068,13 +1081,18 @@
+ 	/* don't assume the hardware handles USB_ZERO_PACKET
+ 	 * NOTE:  strictly conforming cdc-ether devices should expect
+ 	 * the ZLP here, but ignore the one-byte packet.
++	 * NOTE2: CDC NCM specification is different from CDC ECM when
++	 * handling ZLP/short packets, so cdc_ncm driver will make short
++	 * packet itself if needed.
+ 	 */
+ 	if (length % dev->maxpacket == 0) {
+ 		if (!(info->flags & FLAG_SEND_ZLP)) {
+-			urb->transfer_buffer_length++;
+-			if (skb_tailroom(skb)) {
+-				skb->data[skb->len] = 0;
+-				__skb_put(skb, 1);
++			if (!(info->flags & FLAG_MULTI_PACKET)) {
++				urb->transfer_buffer_length++;
++				if (skb_tailroom(skb)) {
++					skb->data[skb->len] = 0;
++					__skb_put(skb, 1);
++				}
+ 			}
+ 		} else
+ 			urb->transfer_flags |= URB_ZERO_PACKET;
+@@ -1123,6 +1141,7 @@
+ 		netif_dbg(dev, tx_err, dev->net, "drop, code %d\n", retval);
+ drop:
+ 		dev->net->stats.tx_dropped++;
++not_drop:
+ 		if (skb)
+ 			dev_kfree_skb_any (skb);
+ 		usb_free_urb (urb);
+@@ -1346,7 +1365,8 @@
+ 		// else "eth%d" when there's reasonable doubt.  userspace
+ 		// can rename the link if it knows better.
+ 		if ((dev->driver_info->flags & FLAG_ETHER) != 0 &&
+-		    (net->dev_addr [0] & 0x02) == 0)
++		    ((dev->driver_info->flags & FLAG_POINTTOPOINT) == 0 ||
++		     (net->dev_addr [0] & 0x02) == 0))
+ 			strcpy (net->name, "eth%d");
+ 		/* WLAN devices should always be named "wlan%d" */
+ 		if ((dev->driver_info->flags & FLAG_WLAN) != 0)
+@@ -1378,7 +1398,12 @@
+ 
+ 	if (!dev->rx_urb_size)
+ 		dev->rx_urb_size = dev->hard_mtu;
+-	dev->maxpacket = usb_maxpacket (dev->udev, dev->out, 1);
++	if (!dev->maxpacket)
++		dev->maxpacket = usb_maxpacket (dev->udev, dev->out, 1);
++	if (!dev->maxpacket) {
++		status = -ENODEV;
++		goto out3;
++	}
+ 
+ 	if ((dev->driver_info->flags & FLAG_WLAN) != 0)
+ 		SET_NETDEV_DEVTYPE(net, &wlan_type);
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc-acm.c linux-2.6.35.3/drivers/usb/class/cdc-acm.c
+--- linux-2.6.35.3.orig/drivers/usb/class/cdc-acm.c	2012-03-15 16:41:46.800127284 +0000
++++ linux-2.6.35.3/drivers/usb/class/cdc-acm.c	2012-03-08 11:43:17.000000000 +0000
+@@ -363,6 +363,7 @@
+ 		dev_dbg(&acm->data->dev, "bulk rx status %d\n", status);
+ 
+ 	buf = rcv->buffer;
++	buf->head = buf->base;
+ 	buf->size = urb->actual_length;
+ 
+ 	if (likely(status == 0)) {
+@@ -392,6 +393,7 @@
+ 	struct acm_ru *rcv;
+ 	unsigned long flags;
+ 	unsigned char throttled;
++	int copied;
+ 
+ 	dbg("Entering acm_rx_tasklet");
+ 
+@@ -423,12 +425,14 @@
+ 
+ 	dbg("acm_rx_tasklet: procesing buf 0x%p, size = %d", buf, buf->size);
+ 
++	copied = buf->size;
+ 	if (tty) {
+ 		spin_lock_irqsave(&acm->throttle_lock, flags);
+ 		throttled = acm->throttle;
+ 		spin_unlock_irqrestore(&acm->throttle_lock, flags);
+ 		if (!throttled) {
+-			tty_insert_flip_string(tty, buf->base, buf->size);
++			copied = tty_insert_flip_string(tty,
++							buf->head, buf->size);
+ 			tty_flip_buffer_push(tty);
+ 		} else {
+ 			tty_kref_put(tty);
+@@ -440,9 +444,24 @@
+ 		}
+ 	}
+ 
+-	spin_lock_irqsave(&acm->read_lock, flags);
+-	list_add(&buf->list, &acm->spare_read_bufs);
+-	spin_unlock_irqrestore(&acm->read_lock, flags);
++	buf->head += copied;
++	buf->size -= copied;
++
++	if (buf->size == 0) {
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->spare_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++	} else {
++		tty_kref_put(tty);
++		dbg("Partial buffer fill");
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->filled_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++		/* Make sure that the tasklet will get run again. */
++		schedule_work(&acm->work_throttle_check);
++		return;
++	}
++
+ 	goto next_buffer;
+ 
+ urbs:
+@@ -519,14 +538,14 @@
+ 	acm_write_done(acm, wb);
+ 	spin_unlock_irqrestore(&acm->write_lock, flags);
+ 	if (ACM_READY(acm))
+-		schedule_work(&acm->work);
++		schedule_work(&acm->work_wake);
+ 	else
+ 		wake_up_interruptible(&acm->drain_wait);
+ }
+ 
+-static void acm_softint(struct work_struct *work)
++static void acm_softint_wake(struct work_struct *work)
+ {
+-	struct acm *acm = container_of(work, struct acm, work);
++	struct acm *acm = container_of(work, struct acm, work_wake);
+ 	struct tty_struct *tty;
+ 
+ 	dev_vdbg(&acm->data->dev, "tx work\n");
+@@ -537,6 +556,42 @@
+ 	tty_kref_put(tty);
+ }
+ 
++static void acm_softint_throttle_check(struct work_struct *work)
++{
++	struct acm *acm = container_of(work, struct acm, work_throttle_check);
++	struct tty_struct *tty;
++	struct acm_rb *buf;
++	size_t needed = 1;
++	int available;
++
++	dev_vdbg(&acm->data->dev, "throttle check\n");
++	if (!ACM_READY(acm))
++		return;
++	tty = tty_port_tty_get(&acm->port);
++	if (!tty)
++		return;
++
++	/* See how much space is needed */
++	spin_lock(&acm->read_lock);
++	if (!list_empty(&acm->filled_read_bufs)) {
++		buf = list_entry(acm->filled_read_bufs.next,
++				 struct acm_rb, list);
++		needed = buf->size;
++	}
++	spin_unlock(&acm->read_lock);
++
++	available = tty_buffer_request_room(tty, needed);
++	if (available < needed) {
++		/* Throttle so that notification occurs when there is
++		 * more space available in the buffers. */
++		tty_throttle(tty);
++	} else {
++		/* Buffer has already been emptied, restart reading */
++		tasklet_schedule(&acm->urb_task);
++	}
++	tty_kref_put(tty);
++}
++
+ /*
+  * TTY handlers
+  */
+@@ -640,7 +695,6 @@
+ static void acm_port_down(struct acm *acm, int drain)
+ {
+ 	int i, nr = acm->rx_buflimit;
+-	mutex_lock(&open_mutex);
+ 	if (acm->dev) {
+ 		usb_autopm_get_interface(acm->control);
+ 		acm_set_control(acm, acm->ctrlout = 0);
+@@ -658,14 +712,23 @@
+ 		acm->control->needs_remote_wakeup = 0;
+ 		usb_autopm_put_interface(acm->control);
+ 	}
+-	mutex_unlock(&open_mutex);
+ }
+ 
+ static void acm_tty_hangup(struct tty_struct *tty)
+ {
+-	struct acm *acm = tty->driver_data;
++	struct acm *acm;
++
++	mutex_lock(&open_mutex);
++	acm = tty->driver_data;
++ 
++	if (!acm)
++		goto out;
++
+ 	tty_port_hangup(&acm->port);
+ 	acm_port_down(acm, 0);
++
++out:
++	mutex_unlock(&open_mutex);
+ }
+ 
+ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
+@@ -676,8 +739,9 @@
+ 	   shutdown */
+ 	if (!acm)
+ 		return;
++
++	mutex_lock(&open_mutex);
+ 	if (tty_port_close_start(&acm->port, tty, filp) == 0) {
+-		mutex_lock(&open_mutex);
+ 		if (!acm->dev) {
+ 			tty_port_tty_set(&acm->port, NULL);
+ 			acm_tty_unregister(acm);
+@@ -689,6 +753,7 @@
+ 	acm_port_down(acm, 0);
+ 	tty_port_close_end(&acm->port, tty);
+ 	tty_port_tty_set(&acm->port, NULL);
++	mutex_unlock(&open_mutex);
+ }
+ 
+ static int acm_tty_write(struct tty_struct *tty,
+@@ -972,7 +1037,8 @@
+ 	}
+ 
+ 	if (!buflen) {
+-		if (intf->cur_altsetting->endpoint->extralen &&
++		if (intf->cur_altsetting->endpoint &&
++				intf->cur_altsetting->endpoint->extralen &&
+ 				intf->cur_altsetting->endpoint->extra) {
+ 			dev_dbg(&intf->dev,
+ 				"Seeking extra descriptors on endpoint\n");
+@@ -1165,7 +1231,8 @@
+ 	acm->rx_buflimit = num_rx_buf;
+ 	acm->urb_task.func = acm_rx_tasklet;
+ 	acm->urb_task.data = (unsigned long) acm;
+-	INIT_WORK(&acm->work, acm_softint);
++	INIT_WORK(&acm->work_wake, acm_softint_wake);
++	INIT_WORK(&acm->work_throttle_check, acm_softint_throttle_check);
+ 	init_waitqueue_head(&acm->drain_wait);
+ 	spin_lock_init(&acm->throttle_lock);
+ 	spin_lock_init(&acm->write_lock);
+@@ -1322,6 +1389,7 @@
+ 	dbg("Entering stop_data_traffic");
+ 
+ 	tasklet_disable(&acm->urb_task);
++	cancel_work_sync(&acm->work_throttle_check);
+ 
+ 	usb_kill_urb(acm->ctrlurb);
+ 	for (i = 0; i < ACM_NW; i++)
+@@ -1331,7 +1399,7 @@
+ 
+ 	tasklet_enable(&acm->urb_task);
+ 
+-	cancel_work_sync(&acm->work);
++	cancel_work_sync(&acm->work_wake);
+ }
+ 
+ static void acm_disconnect(struct usb_interface *intf)
+@@ -1488,6 +1556,11 @@
+ 		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
+ 		USB_CDC_ACM_PROTO_VENDOR)
+ 
++#define SAMSUNG_PCSUITE_ACM_INFO(x) \
++		USB_DEVICE_AND_INTERFACE_INFO(0x04e7, x, \
++		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
++		USB_CDC_ACM_PROTO_VENDOR)
++
+ /*
+  * USB driver structure.
+  */
+@@ -1598,6 +1671,17 @@
+ 	{ NOKIA_PCSUITE_ACM_INFO(0x0108), }, /* Nokia 5320 XpressMusic 2G */
+ 	{ NOKIA_PCSUITE_ACM_INFO(0x01f5), }, /* Nokia N97, RM-505 */
+ 	{ NOKIA_PCSUITE_ACM_INFO(0x02e3), }, /* Nokia 5230, RM-588 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0178), }, /* Nokia E63 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x010e), }, /* Nokia E75 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x02d9), }, /* Nokia 6760 Slide */
++	{ NOKIA_PCSUITE_ACM_INFO(0x01d0), }, /* Nokia E52 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0223), }, /* Nokia E72 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0275), }, /* Nokia X6 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x026c), }, /* Nokia N97 Mini */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0154), }, /* Nokia 5800 XpressMusic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04ce), }, /* Nokia E90 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x01d4), }, /* Nokia E55 */
++	{ SAMSUNG_PCSUITE_ACM_INFO(0x6651), }, /* Samsung GTi8510 (INNOV8) */
+ 
+ 	/* NOTE: non-Nokia COMM/ACM/0xff is likely MSFT RNDIS... NOT a modem! */
+ 
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc-acm.h linux-2.6.35.3/drivers/usb/class/cdc-acm.h
+--- linux-2.6.35.3.orig/drivers/usb/class/cdc-acm.h	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/drivers/usb/class/cdc-acm.h	2011-03-23 16:53:38.000000000 +0000
+@@ -75,6 +75,7 @@
+ 	struct list_head	list;
+ 	int			size;
+ 	unsigned char		*base;
++	unsigned char		*head;
+ 	dma_addr_t		dma;
+ };
+ 
+@@ -111,7 +112,8 @@
+ 	spinlock_t write_lock;
+ 	struct mutex mutex;
+ 	struct usb_cdc_line_coding line;		/* bits, stop, parity */
+-	struct work_struct work;			/* work queue entry for line discipline waking up */
++	struct work_struct work_wake;			/* for tty wake up */
++	struct work_struct work_throttle_check;		/* for throttling */
+ 	wait_queue_head_t drain_wait;			/* close processing */
+ 	struct tasklet_struct urb_task;                 /* rx processing */
+ 	spinlock_t throttle_lock;			/* synchronize throtteling and read callback */
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/cdc.h linux-2.6.35.3/include/linux/usb/cdc.h
+--- linux-2.6.35.3.orig/include/linux/usb/cdc.h	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/include/linux/usb/cdc.h	2012-02-15 17:12:40.000000000 +0000
+@@ -32,6 +32,8 @@
+ 
+ #define USB_CDC_PROTO_EEM			7
+ 
++#define USB_CDC_NCM_PROTO_NTB			1
++
+ /*-------------------------------------------------------------------------*/
+ 
+ /*
+@@ -269,18 +271,23 @@
+ 	__le16	wLength;
+ } __attribute__ ((packed));
+ 
++struct usb_cdc_speed_change {
++	__le32	DLBitRRate;	/* contains the downlink bit rate (IN pipe) */
++	__le32	ULBitRate;	/* contains the uplink bit rate (OUT pipe) */
++} __attribute__ ((packed));
++
+ /*-------------------------------------------------------------------------*/
+ 
+ /*
+  * Class Specific structures and constants
+  *
+- * CDC NCM parameter structure, CDC NCM subclass 6.2.1
++ * CDC NCM NTB parameters structure, CDC NCM subclass 6.2.1
+  *
+  */
+ 
+-struct usb_cdc_ncm_ntb_parameter {
++struct usb_cdc_ncm_ntb_parameters {
+ 	__le16	wLength;
+-	__le16	bmNtbFormatSupported;
++	__le16	bmNtbFormatsSupported;
+ 	__le32	dwNtbInMaxSize;
+ 	__le16	wNdpInDivisor;
+ 	__le16	wNdpInPayloadRemainder;
+@@ -290,22 +297,22 @@
+ 	__le16	wNdpOutDivisor;
+ 	__le16	wNdpOutPayloadRemainder;
+ 	__le16	wNdpOutAlignment;
+-	__le16	wPadding2;
++	__le16	wNtbOutMaxDatagrams;
+ } __attribute__ ((packed));
+ 
+ /*
+  * CDC NCM transfer headers, CDC NCM subclass 3.2
+  */
+ 
+-#define NCM_NTH16_SIGN		0x484D434E /* NCMH */
+-#define NCM_NTH32_SIGN		0x686D636E /* ncmh */
++#define USB_CDC_NCM_NTH16_SIGN		0x484D434E /* NCMH */
++#define USB_CDC_NCM_NTH32_SIGN		0x686D636E /* ncmh */
+ 
+ struct usb_cdc_ncm_nth16 {
+ 	__le32	dwSignature;
+ 	__le16	wHeaderLength;
+ 	__le16	wSequence;
+ 	__le16	wBlockLength;
+-	__le16	wFpIndex;
++	__le16	wNdpIndex;
+ } __attribute__ ((packed));
+ 
+ struct usb_cdc_ncm_nth32 {
+@@ -313,32 +320,93 @@
+ 	__le16	wHeaderLength;
+ 	__le16	wSequence;
+ 	__le32	dwBlockLength;
+-	__le32	dwFpIndex;
++	__le32	dwNdpIndex;
+ } __attribute__ ((packed));
+ 
+ /*
+  * CDC NCM datagram pointers, CDC NCM subclass 3.3
+  */
+ 
+-#define NCM_NDP16_CRC_SIGN	0x314D434E /* NCM1 */
+-#define NCM_NDP16_NOCRC_SIGN	0x304D434E /* NCM0 */
+-#define NCM_NDP32_CRC_SIGN	0x316D636E /* ncm1 */
+-#define NCM_NDP32_NOCRC_SIGN	0x306D636E /* ncm0 */
++#define USB_CDC_NCM_NDP16_CRC_SIGN	0x314D434E /* NCM1 */
++#define USB_CDC_NCM_NDP16_NOCRC_SIGN	0x304D434E /* NCM0 */
++#define USB_CDC_NCM_NDP32_CRC_SIGN	0x316D636E /* ncm1 */
++#define USB_CDC_NCM_NDP32_NOCRC_SIGN	0x306D636E /* ncm0 */
++
++/* 16-bit NCM Datagram Pointer Entry */
++struct usb_cdc_ncm_dpe16 {
++	__le16	wDatagramIndex;
++	__le16	wDatagramLength;
++} __attribute__((__packed__));
+ 
++/* 16-bit NCM Datagram Pointer Table */
+ struct usb_cdc_ncm_ndp16 {
+ 	__le32	dwSignature;
+ 	__le16	wLength;
+-	__le16	wNextFpIndex;
+-	__u8	data[0];
++	__le16	wNextNdpIndex;
++	struct	usb_cdc_ncm_dpe16 dpe16[0];
+ } __attribute__ ((packed));
+ 
++/* 32-bit NCM Datagram Pointer Entry */
++struct usb_cdc_ncm_dpe32 {
++	__le32	dwDatagramIndex;
++	__le32	dwDatagramLength;
++} __attribute__((__packed__));
++
++/* 32-bit NCM Datagram Pointer Table */
+ struct usb_cdc_ncm_ndp32 {
+ 	__le32	dwSignature;
+ 	__le16	wLength;
+ 	__le16	wReserved6;
+-	__le32	dwNextFpIndex;
++	__le32	dwNextNdpIndex;
+ 	__le32	dwReserved12;
+-	__u8	data[0];
++	struct	usb_cdc_ncm_dpe32 dpe32[0];
+ } __attribute__ ((packed));
+ 
++/* CDC NCM subclass 3.2.1 and 3.2.2 */
++#define USB_CDC_NCM_NDP16_INDEX_MIN			0x000C
++#define USB_CDC_NCM_NDP32_INDEX_MIN			0x0010
++
++/* CDC NCM subclass 3.3.3 Datagram Formatting */
++#define USB_CDC_NCM_DATAGRAM_FORMAT_CRC			0x30
++#define USB_CDC_NCM_DATAGRAM_FORMAT_NOCRC		0X31
++
++/* CDC NCM subclass 4.2 NCM Communications Interface Protocol Code */
++#define USB_CDC_NCM_PROTO_CODE_NO_ENCAP_COMMANDS	0x00
++#define USB_CDC_NCM_PROTO_CODE_EXTERN_PROTO		0xFE
++
++/* CDC NCM subclass 5.2.1 NCM Functional Descriptor, bmNetworkCapabilities */
++#define USB_CDC_NCM_NCAP_ETH_FILTER			(1 << 0)
++#define USB_CDC_NCM_NCAP_NET_ADDRESS			(1 << 1)
++#define USB_CDC_NCM_NCAP_ENCAP_COMMAND			(1 << 2)
++#define USB_CDC_NCM_NCAP_MAX_DATAGRAM_SIZE		(1 << 3)
++#define USB_CDC_NCM_NCAP_CRC_MODE			(1 << 4)
++#define	USB_CDC_NCM_NCAP_NTB_INPUT_SIZE			(1 << 5)
++
++/* CDC NCM subclass Table 6-3: NTB Parameter Structure */
++#define USB_CDC_NCM_NTB16_SUPPORTED			(1 << 0)
++#define USB_CDC_NCM_NTB32_SUPPORTED			(1 << 1)
++
++/* CDC NCM subclass Table 6-3: NTB Parameter Structure */
++#define USB_CDC_NCM_NDP_ALIGN_MIN_SIZE			0x04
++#define USB_CDC_NCM_NTB_MAX_LENGTH			0x1C
++
++/* CDC NCM subclass 6.2.5 SetNtbFormat */
++#define USB_CDC_NCM_NTB16_FORMAT			0x00
++#define USB_CDC_NCM_NTB32_FORMAT			0x01
++
++/* CDC NCM subclass 6.2.7 SetNtbInputSize */
++#define USB_CDC_NCM_NTB_MIN_IN_SIZE			2048
++#define USB_CDC_NCM_NTB_MIN_OUT_SIZE			2048
++
++/* NTB Input Size Structure */
++struct usb_cdc_ncm_ndp_input_size {
++	__le32	dwNtbInMaxSize;
++	__le16	wNtbInMaxDatagrams;
++	__le16	wReserved;
++} __attribute__ ((packed));
++
++/* CDC NCM subclass 6.2.11 SetCrcMode */
++#define USB_CDC_NCM_CRC_NOT_APPENDED			0x00
++#define USB_CDC_NCM_CRC_APPENDED			0x01
++
+ #endif /* __LINUX_USB_CDC_H */
+diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/usbnet.h linux-2.6.35.3/include/linux/usb/usbnet.h
+--- linux-2.6.35.3.orig/include/linux/usb/usbnet.h	2010-08-20 19:55:55.000000000 +0100
++++ linux-2.6.35.3/include/linux/usb/usbnet.h	2012-02-15 17:12:40.000000000 +0000
+@@ -68,6 +68,7 @@
+ #		define EVENT_RX_PAUSED	5
+ #		define EVENT_DEV_WAKING 6
+ #		define EVENT_DEV_ASLEEP 7
++#		define EVENT_DEV_OPEN	8
+ };
+ 
+ static inline struct usb_driver *driver_of(struct usb_interface *intf)
+@@ -97,6 +98,14 @@
+ 
+ #define FLAG_LINK_INTR	0x0800		/* updates link (carrier) status */
+ 
++#define FLAG_POINTTOPOINT 0x1000	/* possibly use "usb%d" names */
++
++/*
++ * Indicates to usbnet, that USB driver accumulates multiple IP packets.
++ * Affects statistic (counters) and short packet handling.
++ */
++#define FLAG_MULTI_PACKET	0x2000
++
+ 	/* init device ... can sleep, or cause probe() failure */
+ 	int	(*bind)(struct usbnet *, struct usb_interface *);
+ 
+@@ -166,7 +175,9 @@
+ };
+ 
+ extern int usbnet_generic_cdc_bind(struct usbnet *, struct usb_interface *);
++extern int usbnet_cdc_bind(struct usbnet *, struct usb_interface *);
+ extern void usbnet_cdc_unbind(struct usbnet *, struct usb_interface *);
++extern void usbnet_cdc_status(struct usbnet *, struct urb *);
+ 
+ /* CDC and RNDIS support the same host-chosen packet filters for IN transfers */
+ #define	DEFAULT_FILTER	(USB_CDC_PACKET_TYPE_BROADCAST \
