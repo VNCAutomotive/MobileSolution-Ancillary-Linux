@@ -1,3 +1,5 @@
+Patch based on 2.6.38-13.56
+
 diff -urN a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
 --- a/drivers/net/usb/cdc_ncm.c	2012-03-15 17:56:45.449959542 +0000
 +++ b/drivers/net/usb/cdc_ncm.c	2012-03-16 10:40:21.681391918 +0000
