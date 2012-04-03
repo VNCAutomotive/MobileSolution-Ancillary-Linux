@@ -1,0 +1,294 @@
+From 5bf850829ae664f9b241ac851ce26baaecf7152f Mon Sep 17 00:00:00 2001
+From: Toby Gray <toby.gray@realvnc.com>
+Date: Tue, 3 Apr 2012 15:16:05 +0100
+Subject: [PATCH 1/4] This patch contains the following series of patches:
+
+* 0002-acm-data-loss-fix.patch
+* 0003-commit-5dc2470.patch
+* 0004-acm-disconnect-hang.patch
+* 0011-usb_cdc-ncm_Increase-maximum-allowed-datagram-size.patch
+* 0012-usb_cdc-ncm_Change-alternate-setting-magic-numbers-into-defines.patch
+* 0013-usb_cdc-ncm_Set-altsetting-only-when-network-interface-is-opened.patch
+* 0014-usb_usbnet_Allow-drivers-using-usbnet-to-specify-maximum-packet-size.patch
+* 0015-usb_cdc-ncm_Allow-NCM-driver-to-determine-dev-maxpacket.patch
+
+These are all in one patch for historical reasons. Future patches should
+add extra patches to the patch series.
+---
+ drivers/net/usb/cdc_ncm.c   |   52 +++++++++++++++++++++++++++++++++---------
+ drivers/net/usb/usbnet.c    |    3 +-
+ drivers/usb/class/cdc-acm.c |   44 +++++++++++++++++++++++++++++------
+ drivers/usb/class/cdc-acm.h |    1 +
+ 4 files changed, 80 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
+index 9d78fe6..ab4e157 100644
+--- a/drivers/net/usb/cdc_ncm.c
++++ b/drivers/net/usb/cdc_ncm.c
+@@ -68,8 +68,10 @@
+ 
+ #define	CDC_NCM_MIN_TX_PKT			512	/* bytes */
+ 
+-/* Default value for MaxDatagramSize */
+-#define	CDC_NCM_MAX_DATAGRAM_SIZE		2048	/* bytes */
++/* Maximum value for MaxDatagramSize, this is 16k (max NTB size)
++ * minus NTH size (12 bytes) and minus the smallest possible NDP size
++ * (16 bytes). */
++#define	CDC_NCM_MAX_DATAGRAM_SIZE		16356	/* bytes */
+ 
+ /*
+  * Maximum amount of datagrams in NCM Datagram Pointer Table, not counting
+@@ -88,6 +90,13 @@
+ 	(sizeof(struct usb_cdc_ncm_nth16) + sizeof(struct usb_cdc_ncm_ndp16) + \
+ 	(CDC_NCM_DPT_DATAGRAMS_MAX + 1) * sizeof(struct usb_cdc_ncm_dpe16))
+ 
++/* CDC NCM ch. 5.3 describes alternate setting 0 as having no
++ * endpoints and therefore not allowing any networking traffic. */
++#define	CDC_NCM_ALTSETTING_RESET	0
++/* CDC NCM ch. 5.3 describes alternate setting 1 as having the
++ * required bulk endpoints for normal operation. */
++#define	CDC_NCM_ALTSETTING_DATA		1
++
+ struct cdc_ncm_data {
+ 	struct usb_cdc_ncm_nth16 nth16;
+ 	struct usb_cdc_ncm_ndp16 ndp16;
+@@ -421,14 +430,14 @@ static u8 cdc_ncm_setup(struct cdc_ncm_ctx *ctx)
+ }
+ 
+ static void
+-cdc_ncm_find_endpoints(struct cdc_ncm_ctx *ctx, struct usb_interface *intf)
++cdc_ncm_find_endpoints(struct cdc_ncm_ctx *ctx, struct usb_host_interface *intf)
+ {
+ 	struct usb_host_endpoint *e;
+ 	u8 ep;
+ 
+-	for (ep = 0; ep < intf->cur_altsetting->desc.bNumEndpoints; ep++) {
++	for (ep = 0; ep < intf->desc.bNumEndpoints; ep++) {
+ 
+-		e = intf->cur_altsetting->endpoint + ep;
++		e = intf->endpoint + ep;
+ 		switch (e->desc.bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) {
+ 		case USB_ENDPOINT_XFER_INT:
+ 			if (usb_endpoint_dir_in(&e->desc)) {
+@@ -488,6 +497,7 @@ static int cdc_ncm_bind(struct usbnet *dev, struct usb_interface *intf)
+ {
+ 	struct cdc_ncm_ctx *ctx;
+ 	struct usb_driver *driver;
++	struct usb_host_interface *data_altsetting;
+ 	u8 *buf;
+ 	int len;
+ 	int temp;
+@@ -589,7 +599,7 @@ advance:
+ 	iface_no = ctx->data->cur_altsetting->desc.bInterfaceNumber;
+ 
+ 	/* reset data interface */
+-	temp = usb_set_interface(dev->udev, iface_no, 0);
++	temp = usb_set_interface(dev->udev, iface_no, CDC_NCM_ALTSETTING_RESET);
+ 	if (temp)
+ 		goto error;
+ 
+@@ -597,13 +607,14 @@ advance:
+ 	if (cdc_ncm_setup(ctx))
+ 		goto error;
+ 
+-	/* configure data interface */
+-	temp = usb_set_interface(dev->udev, iface_no, 1);
+-	if (temp)
++	/* find the data interface altsetting */
++	data_altsetting =
++		usb_altnum_to_altsetting(ctx->data, CDC_NCM_ALTSETTING_DATA);
++	if (data_altsetting == NULL)
+ 		goto error;
+ 
+-	cdc_ncm_find_endpoints(ctx, ctx->data);
+-	cdc_ncm_find_endpoints(ctx, ctx->control);
++	cdc_ncm_find_endpoints(ctx, data_altsetting);
++	cdc_ncm_find_endpoints(ctx, ctx->control->cur_altsetting);
+ 
+ 	if ((ctx->in_ep == NULL) || (ctx->out_ep == NULL) ||
+ 	    (ctx->status_ep == NULL))
+@@ -631,6 +642,7 @@ advance:
+ 		ctx->out_ep->desc.bEndpointAddress & USB_ENDPOINT_NUMBER_MASK);
+ 	dev->status = ctx->status_ep;
+ 	dev->rx_urb_size = ctx->rx_max;
++	dev->maxpacket = le16_to_cpu(ctx->out_ep->desc.wMaxPacketSize);
+ 
+ 	/*
+ 	 * We should get an event when network connection is "connected" or
+@@ -1113,6 +1125,23 @@ error:
+ 	return 0;
+ }
+ 
++static int cdc_ncm_reset(struct usbnet *dev)
++{
++	struct cdc_ncm_ctx *ctx;
++	int temp;
++	u8 iface_no;
++
++	ctx = (struct cdc_ncm_ctx *)dev->data[0];
++	iface_no = ctx->data->cur_altsetting->desc.bInterfaceNumber;
++
++	/* configure data interface */
++	temp = usb_set_interface(dev->udev, iface_no, CDC_NCM_ALTSETTING_DATA);
++	if (temp)
++		return temp;
++
++	return 0;
++}
++
+ static void
+ cdc_ncm_speed_change(struct cdc_ncm_ctx *ctx,
+ 		     struct usb_cdc_speed_change *data)
+@@ -1245,6 +1274,7 @@ static const struct driver_info cdc_ncm_info = {
+ 	.status = cdc_ncm_status,
+ 	.rx_fixup = cdc_ncm_rx_fixup,
+ 	.tx_fixup = cdc_ncm_tx_fixup,
++	.reset = cdc_ncm_reset,
+ };
+ 
+ static struct usb_driver cdc_ncm_driver = {
+diff --git a/drivers/net/usb/usbnet.c b/drivers/net/usb/usbnet.c
+index 95c41d5..a275bf8 100644
+--- a/drivers/net/usb/usbnet.c
++++ b/drivers/net/usb/usbnet.c
+@@ -1408,7 +1408,8 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
+ 
+ 	if (!dev->rx_urb_size)
+ 		dev->rx_urb_size = dev->hard_mtu;
+-	dev->maxpacket = usb_maxpacket (dev->udev, dev->out, 1);
++	if (!dev->maxpacket)
++		dev->maxpacket = usb_maxpacket(dev->udev, dev->out, 1);
+ 
+ 	if ((dev->driver_info->flags & FLAG_WLAN) != 0)
+ 		SET_NETDEV_DEVTYPE(net, &wlan_type);
+diff --git a/drivers/usb/class/cdc-acm.c b/drivers/usb/class/cdc-acm.c
+index 83589f4..17087b0 100644
+--- a/drivers/usb/class/cdc-acm.c
++++ b/drivers/usb/class/cdc-acm.c
+@@ -364,6 +364,7 @@ static void acm_read_bulk(struct urb *urb)
+ 		dev_dbg(&acm->data->dev, "bulk rx status %d\n", status);
+ 
+ 	buf = rcv->buffer;
++	buf->head = buf->base;
+ 	buf->size = urb->actual_length;
+ 
+ 	if (likely(status == 0)) {
+@@ -393,6 +394,7 @@ static void acm_rx_tasklet(unsigned long _acm)
+ 	struct acm_ru *rcv;
+ 	unsigned long flags;
+ 	unsigned char throttled;
++	int copied;
+ 
+ 	dbg("Entering acm_rx_tasklet");
+ 
+@@ -424,12 +426,14 @@ next_buffer:
+ 
+ 	dbg("acm_rx_tasklet: procesing buf 0x%p, size = %d", buf, buf->size);
+ 
++	copied = buf->size;
+ 	if (tty) {
+ 		spin_lock_irqsave(&acm->throttle_lock, flags);
+ 		throttled = acm->throttle;
+ 		spin_unlock_irqrestore(&acm->throttle_lock, flags);
+ 		if (!throttled) {
+-			tty_insert_flip_string(tty, buf->base, buf->size);
++			copied = tty_insert_flip_string(tty,
++							buf->head, buf->size);
+ 			tty_flip_buffer_push(tty);
+ 		} else {
+ 			tty_kref_put(tty);
+@@ -441,9 +445,22 @@ next_buffer:
+ 		}
+ 	}
+ 
+-	spin_lock_irqsave(&acm->read_lock, flags);
+-	list_add(&buf->list, &acm->spare_read_bufs);
+-	spin_unlock_irqrestore(&acm->read_lock, flags);
++	buf->head += copied;
++	buf->size -= copied;
++
++	if (buf->size == 0) {
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->spare_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++	} else {
++		tty_kref_put(tty);
++		dbg("Partial buffer fill");
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->filled_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++		return;
++	}
++
+ 	goto next_buffer;
+ 
+ urbs:
+@@ -642,7 +659,7 @@ static int acm_tty_chars_in_buffer(struct tty_struct *tty);
+ static void acm_port_down(struct acm *acm)
+ {
+ 	int i, nr = acm->rx_buflimit;
+-	mutex_lock(&open_mutex);
++
+ 	if (acm->dev) {
+ 		usb_autopm_get_interface(acm->control);
+ 		acm_set_control(acm, acm->ctrlout = 0);
+@@ -656,14 +673,23 @@ static void acm_port_down(struct acm *acm)
+ 		acm->control->needs_remote_wakeup = 0;
+ 		usb_autopm_put_interface(acm->control);
+ 	}
+-	mutex_unlock(&open_mutex);
+ }
+ 
+ static void acm_tty_hangup(struct tty_struct *tty)
+ {
+-	struct acm *acm = tty->driver_data;
++	struct acm *acm;
++
++	mutex_lock(&open_mutex);
++	acm = tty->driver_data;
++
++	if (!acm)
++		goto out;
++
+ 	tty_port_hangup(&acm->port);
+ 	acm_port_down(acm);
++
++out:
++	mutex_unlock(&open_mutex);
+ }
+ 
+ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
+@@ -674,8 +700,9 @@ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
+ 	   shutdown */
+ 	if (!acm)
+ 		return;
++
++	mutex_lock(&open_mutex);
+ 	if (tty_port_close_start(&acm->port, tty, filp) == 0) {
+-		mutex_lock(&open_mutex);
+ 		if (!acm->dev) {
+ 			tty_port_tty_set(&acm->port, NULL);
+ 			acm_tty_unregister(acm);
+@@ -687,6 +714,7 @@ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
+ 	acm_port_down(acm);
+ 	tty_port_close_end(&acm->port, tty);
+ 	tty_port_tty_set(&acm->port, NULL);
++	mutex_unlock(&open_mutex);
+ }
+ 
+ static int acm_tty_write(struct tty_struct *tty,
+diff --git a/drivers/usb/class/cdc-acm.h b/drivers/usb/class/cdc-acm.h
+index a2446d6..f02e164 100644
+--- a/drivers/usb/class/cdc-acm.h
++++ b/drivers/usb/class/cdc-acm.h
+@@ -75,6 +75,7 @@ struct acm_rb {
+ 	struct list_head	list;
+ 	int			size;
+ 	unsigned char		*base;
++	unsigned char		*head;
+ 	dma_addr_t		dma;
+ };
+ 
+-- 
+1.7.4.1
+

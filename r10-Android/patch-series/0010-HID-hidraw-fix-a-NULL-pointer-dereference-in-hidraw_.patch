@@ -1,7 +1,7 @@
-From 5cbad6625440f6e01992f4e0ef59366e3851aa9f Mon Sep 17 00:00:00 2001
+From 869059b4853b883c02ca1a41ac291f6b2f548314 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@gmail.com>
 Date: Tue, 5 Oct 2010 17:20:17 +0200
-Subject: [PATCH 10/10] HID: hidraw, fix a NULL pointer dereference in hidraw_write
+Subject: [PATCH 10/13] HID: hidraw, fix a NULL pointer dereference in hidraw_write
 
 BUG: unable to handle kernel NULL pointer dereference at 0000000000000028
 IP: [<ffffffffa0f0a625>] hidraw_write+0x3b/0x116 [hid]

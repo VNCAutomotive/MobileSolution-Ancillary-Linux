@@ -1,7 +1,8 @@
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/hidraw.c linux-2.6.35.3/drivers/hid/hidraw.c
---- linux-2.6.35.3.orig/drivers/hid/hidraw.c	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/drivers/hid/hidraw.c	2012-03-07 16:45:54.000000000 +0000
-@@ -111,6 +111,12 @@
+diff --git a/drivers/hid/hidraw.c b/drivers/hid/hidraw.c
+index 3ccd478..7dca2fa 100644
+--- a/drivers/hid/hidraw.c
++++ b/drivers/hid/hidraw.c
+@@ -111,6 +111,12 @@ static ssize_t hidraw_write(struct file *file, const char __user *buffer, size_t
  	int ret = 0;
  
  	mutex_lock(&minors_lock);
@@ -14,7 +15,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/hidraw.c 
  	dev = hidraw_table[minor]->hid;
  
  	if (!dev->hid_output_raw_report) {
-@@ -246,6 +252,10 @@
+@@ -246,6 +252,10 @@ static long hidraw_ioctl(struct file *file, unsigned int cmd,
  
  	mutex_lock(&minors_lock);
  	dev = hidraw_table[minor];
@@ -25,7 +26,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/hidraw.c 
  
  	switch (cmd) {
  		case HIDIOCGRDESCSIZE:
-@@ -319,6 +329,7 @@
+@@ -319,6 +329,7 @@ static long hidraw_ioctl(struct file *file, unsigned int cmd,
  
  		ret = -ENOTTY;
  	}
@@ -33,10 +34,11 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/hidraw.c 
  	mutex_unlock(&minors_lock);
  	return ret;
  }
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/usbhid/hiddev.c linux-2.6.35.3/drivers/hid/usbhid/hiddev.c
---- linux-2.6.35.3.orig/drivers/hid/usbhid/hiddev.c	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/drivers/hid/usbhid/hiddev.c	2012-02-15 17:11:50.000000000 +0000
-@@ -592,161 +592,168 @@
+diff --git a/drivers/hid/usbhid/hiddev.c b/drivers/hid/usbhid/hiddev.c
+index c24d2fa..0445a86 100644
+--- a/drivers/hid/usbhid/hiddev.c
++++ b/drivers/hid/usbhid/hiddev.c
+@@ -592,161 +592,168 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
  {
  	struct hiddev_list *list = file->private_data;
  	struct hiddev *hiddev = list->hiddev;
@@ -105,11 +107,12 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/usbhid/hi
 -		dinfo.num_applications = hid->maxapplication;
 -		if (copy_to_user(user_arg, &dinfo, sizeof(dinfo)))
 -			return -EFAULT;
+-
+-		return 0;
 +		{
 +			struct usb_device *dev = hid_to_usb_dev(hid);
 +			struct usbhid_device *usbhid = hid->driver_data;
- 
--		return 0;
++
 +			dinfo.bustype = BUS_USB;
 +			dinfo.busnum = dev->bus->busnum;
 +			dinfo.devnum = dev->devnum;
@@ -290,7 +293,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/usbhid/hi
  
  		field = report->field[finfo.field_index];
  		memset(&finfo, 0, sizeof(finfo));
-@@ -765,10 +772,9 @@
+@@ -765,10 +772,9 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
  		finfo.unit_exponent = field->unit_exponent;
  		finfo.unit = field->unit;
  
@@ -304,7 +307,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/usbhid/hi
  
  	case HIDIOCGUCODE:
  		/* fall through */
-@@ -777,57 +783,66 @@
+@@ -777,57 +783,66 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
  	case HIDIOCGUSAGES:
  	case HIDIOCSUSAGES:
  	case HIDIOCGCOLLECTIONINDEX:
@@ -393,10 +396,11 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/hid/usbhid/hi
  }
  
  #ifdef CONFIG_COMPAT
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/media/video/em28xx/em28xx-core.c linux-2.6.35.3/drivers/media/video/em28xx/em28xx-core.c
---- linux-2.6.35.3.orig/drivers/media/video/em28xx/em28xx-core.c	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/drivers/media/video/em28xx/em28xx-core.c	2012-02-16 12:54:03.000000000 +0000
-@@ -774,8 +774,6 @@
+diff --git a/drivers/media/video/em28xx/em28xx-core.c b/drivers/media/video/em28xx/em28xx-core.c
+index 44c63cb..aec4715 100644
+--- a/drivers/media/video/em28xx/em28xx-core.c
++++ b/drivers/media/video/em28xx/em28xx-core.c
+@@ -774,8 +774,6 @@ int em28xx_resolution_set(struct em28xx *dev)
  	else
  		dev->vbi_height = 18;
  
@@ -405,14 +409,56 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/media/video/e
  
  	em28xx_set_outfmt(dev);
  
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_ncm.c linux-2.6.35.3/drivers/net/usb/cdc_ncm.c
---- linux-2.6.35.3.orig/drivers/net/usb/cdc_ncm.c	1970-01-01 01:00:00.000000000 +0100
-+++ linux-2.6.35.3/drivers/net/usb/cdc_ncm.c	2012-02-15 17:12:40.000000000 +0000
+diff --git a/drivers/net/usb/Kconfig b/drivers/net/usb/Kconfig
+index d7b7018..17ea264 100644
+--- a/drivers/net/usb/Kconfig
++++ b/drivers/net/usb/Kconfig
+@@ -196,6 +196,25 @@ config USB_NET_CDC_EEM
+ 	  IEEE 802 "local assignment" bit is set in the address, a "usbX"
+ 	  name is used instead.
+ 
++config USB_NET_CDC_NCM
++	tristate "CDC NCM support"
++	depends on USB_USBNET
++	default y
++	help
++	  This driver provides support for CDC NCM (Network Control Model
++	  Device USB Class Specification). The CDC NCM specification is
++	  available from <http://www.usb.org/>.
++
++	  Say "y" to link the driver statically, or "m" to build a
++	  dynamically linked module.
++
++	  This driver should work with at least the following devices:
++	    * ST-Ericsson M700 LTE FDD/TDD Mobile Broadband Modem (ref. design)
++	    * ST-Ericsson M5730 HSPA+ Mobile Broadband Modem (reference design)
++	    * ST-Ericsson M570 HSPA+ Mobile Broadband Modem (reference design)
++	    * ST-Ericsson M343 HSPA Mobile Broadband Modem (reference design)
++	    * Ericsson F5521gw Mobile Broadband Module
++
+ config USB_NET_DM9601
+ 	tristate "Davicom DM9601 based USB 1.1 10/100 ethernet devices"
+ 	depends on USB_USBNET
+diff --git a/drivers/net/usb/Makefile b/drivers/net/usb/Makefile
+index b13a279..45f66a3 100644
+--- a/drivers/net/usb/Makefile
++++ b/drivers/net/usb/Makefile
+@@ -25,4 +25,5 @@ obj-$(CONFIG_USB_NET_INT51X1)	+= int51x1.o
+ obj-$(CONFIG_USB_CDC_PHONET)	+= cdc-phonet.o
+ obj-$(CONFIG_USB_IPHETH)	+= ipheth.o
+ obj-$(CONFIG_USB_SIERRA_NET)	+= sierra_net.o
++obj-$(CONFIG_USB_NET_CDC_NCM)	+= cdc_ncm.o
+ 
+diff --git a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
+new file mode 100644
+index 0000000..8bacf5f
+--- /dev/null
++++ b/drivers/net/usb/cdc_ncm.c
 @@ -0,0 +1,1297 @@
 +/*
 + * cdc_ncm.c
 + *
-+ * Copyright (C) ST-Ericsson 2010-2011
++ * Copyright (C) ST-Ericsson 2010-2012
 + * Contact: Alexey Orishko <alexey.orishko@stericsson.com>
 + * Original author: Hans Petter Selasky <hans.petter.selasky@stericsson.com>
 + *
@@ -459,12 +505,11 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +#include <linux/crc32.h>
 +#include <linux/usb.h>
 +#include <linux/version.h>
-+#include <linux/timer.h>
-+#include <linux/spinlock.h>
++#include <linux/hrtimer.h>
 +#include <linux/usb/usbnet.h>
 +#include <linux/usb/cdc.h>
 +
-+#define	DRIVER_VERSION				"01-June-2011"
++#define	DRIVER_VERSION				"01-June-2011-custom"
 +
 +/* CDC NCM subclass 3.2.1 */
 +#define USB_CDC_NCM_NDP16_LENGTH_MIN		0x10
@@ -485,15 +530,14 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +
 +/*
 + * Maximum amount of datagrams in NCM Datagram Pointer Table, not counting
-+ * the last NULL entry. Any additional datagrams in NTB would be discarded.
++ * the last NULL entry.
 + */
-+#define	CDC_NCM_DPT_DATAGRAMS_MAX		32
-+
-+/* Maximum amount of IN datagrams in NTB */
-+#define	CDC_NCM_DPT_DATAGRAMS_IN_MAX		0 /* unlimited */
++#define	CDC_NCM_DPT_DATAGRAMS_MAX		40
 +
 +/* Restart the timer, if amount of datagrams is less than given value */
 +#define	CDC_NCM_RESTART_TIMER_DATAGRAM_CNT	3
++#define	CDC_NCM_TIMER_PENDING_CNT		2
++#define CDC_NCM_TIMER_INTERVAL			(400UL * NSEC_PER_USEC)
 +
 +/* The following macro defines the minimum header space */
 +#define	CDC_NCM_MIN_HDR_SIZE \
@@ -514,10 +558,10 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +};
 +
 +struct cdc_ncm_ctx {
-+	struct cdc_ncm_data rx_ncm;
 +	struct cdc_ncm_data tx_ncm;
 +	struct usb_cdc_ncm_ntb_parameters ncm_parm;
-+	struct timer_list tx_timer;
++	struct hrtimer tx_timer;
++	struct tasklet_struct bh;
 +
 +	const struct usb_cdc_ncm_desc *func_desc;
 +	const struct usb_cdc_header_desc *header_desc;
@@ -537,6 +581,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +	struct sk_buff *tx_rem_skb;
 +
 +	spinlock_t mtx;
++	atomic_t stop;
 +
 +	u32 tx_timer_pending;
 +	u32 tx_curr_offset;
@@ -552,10 +597,13 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +	u16 tx_modulus;
 +	u16 tx_ndp_modulus;
 +	u16 tx_seq;
++	u16 rx_seq;
 +	u16 connected;
 +};
 +
-+static void cdc_ncm_tx_timeout(unsigned long arg);
++static void cdc_ncm_txpath_bh(unsigned long param);
++static void cdc_ncm_tx_timeout_start(struct cdc_ncm_ctx *ctx);
++static enum hrtimer_restart cdc_ncm_tx_timer_cb(struct hrtimer *hr_timer);
 +static const struct driver_info cdc_ncm_info;
 +static struct usb_driver cdc_ncm_driver;
 +static struct ethtool_ops cdc_ncm_ethtool_ops;
@@ -800,15 +848,12 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +		} else {
 +			ctx->max_datagram_size = le16_to_cpu(max_datagram_size);
 +			/* Check Eth descriptor value */
-+			if (eth_max_sz < CDC_NCM_MAX_DATAGRAM_SIZE) {
-+				if (ctx->max_datagram_size > eth_max_sz)
++			if (ctx->max_datagram_size > eth_max_sz)
 +					ctx->max_datagram_size = eth_max_sz;
-+			} else {
-+				if (ctx->max_datagram_size >
-+						CDC_NCM_MAX_DATAGRAM_SIZE)
-+					ctx->max_datagram_size =
++
++			if (ctx->max_datagram_size > CDC_NCM_MAX_DATAGRAM_SIZE)
++				ctx->max_datagram_size =
 +						CDC_NCM_MAX_DATAGRAM_SIZE;
-+			}
 +
 +			if (ctx->max_datagram_size < CDC_NCM_MIN_DATAGRAM_SIZE)
 +				ctx->max_datagram_size =
@@ -823,10 +868,13 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +			req.wLength = 2;
 +			max_datagram_size = cpu_to_le16(ctx->max_datagram_size);
 +
-+			err = cdc_ncm_do_request(ctx, &req, &max_datagram_size,
++			if (ctx->max_datagram_size !=
++					le16_to_cpu(max_datagram_size)) {
++				err = cdc_ncm_do_request(ctx, &req, &max_datagram_size,
 +								0, NULL, 1000);
-+			if (err)
-+				pr_debug("SET_MAX_DATAGRAM_SIZE failed\n");
++				if (err)
++					pr_debug("SET_MAX_DATAGRAM_SIZE failed\n");
++			}
 +		}
 +
 +	}
@@ -875,8 +923,6 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +	if (ctx == NULL)
 +		return;
 +
-+	del_timer_sync(&ctx->tx_timer);
-+
 +	if (ctx->tx_rem_skb != NULL) {
 +		dev_kfree_skb_any(ctx->tx_rem_skb);
 +		ctx->tx_rem_skb = NULL;
@@ -906,7 +952,11 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +
 +	memset(ctx, 0, sizeof(*ctx));
 +
-+	init_timer(&ctx->tx_timer);
++	hrtimer_init(&ctx->tx_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++	ctx->tx_timer.function = &cdc_ncm_tx_timer_cb;
++	ctx->bh.data = (unsigned long)ctx;
++	ctx->bh.func = cdc_ncm_txpath_bh;
++	atomic_set(&ctx->stop, 0);
 +	spin_lock_init(&ctx->mtx);
 +	ctx->netdev = dev->net;
 +
@@ -1059,6 +1109,13 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +
 +	if (ctx == NULL)
 +		return;		/* no setup */
++
++	atomic_set(&ctx->stop, 1);
++
++	if (hrtimer_active(&ctx->tx_timer))
++		hrtimer_cancel(&ctx->tx_timer);
++
++	tasklet_kill(&ctx->bh);
 +
 +	/* disconnect master --> disconnect slave */
 +	if (intf == ctx->control && ctx->data) {
@@ -1230,7 +1287,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +		ctx->tx_curr_last_offset = last_offset;
 +		/* set the pending count */
 +		if (n < CDC_NCM_RESTART_TIMER_DATAGRAM_CNT)
-+			ctx->tx_timer_pending = 2;
++			ctx->tx_timer_pending = CDC_NCM_TIMER_PENDING_CNT;
 +		goto exit_no_skb;
 +
 +	} else {
@@ -1311,44 +1368,49 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +
 +	/* return skb */
 +	ctx->tx_curr_skb = NULL;
++	ctx->netdev->stats.tx_packets += ctx->tx_curr_frame_num;
 +	return skb_out;
 +
 +exit_no_skb:
++	/* Start timer, if there is a remaining skb */
++	if (ctx->tx_curr_skb != NULL)
++		cdc_ncm_tx_timeout_start(ctx);
 +	return NULL;
 +}
 +
 +static void cdc_ncm_tx_timeout_start(struct cdc_ncm_ctx *ctx)
 +{
 +	/* start timer, if not already started */
-+	if (timer_pending(&ctx->tx_timer) == 0) {
-+		ctx->tx_timer.function = &cdc_ncm_tx_timeout;
-+		ctx->tx_timer.data = (unsigned long)ctx;
-+		ctx->tx_timer.expires = jiffies + ((HZ + 999) / 1000);
-+		add_timer(&ctx->tx_timer);
-+	}
++	if (!(hrtimer_active(&ctx->tx_timer) || atomic_read(&ctx->stop)))
++		hrtimer_start(&ctx->tx_timer,
++				ktime_set(0, CDC_NCM_TIMER_INTERVAL),
++				HRTIMER_MODE_REL);
 +}
 +
-+static void cdc_ncm_tx_timeout(unsigned long arg)
++static enum hrtimer_restart cdc_ncm_tx_timer_cb(struct hrtimer *timer)
 +{
-+	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)arg;
-+	u8 restart;
++	struct cdc_ncm_ctx *ctx =
++			container_of(timer, struct cdc_ncm_ctx, tx_timer);
 +
-+	spin_lock(&ctx->mtx);
++	if (!atomic_read(&ctx->stop))
++		tasklet_schedule(&ctx->bh);
++	return HRTIMER_NORESTART;
++}
++
++static void cdc_ncm_txpath_bh(unsigned long param)
++{
++	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)param;
++
++	spin_lock_bh(&ctx->mtx);
 +	if (ctx->tx_timer_pending != 0) {
 +		ctx->tx_timer_pending--;
-+		restart = 1;
-+	} else {
-+		restart = 0;
-+	}
-+
-+	spin_unlock(&ctx->mtx);
-+
-+	if (restart) {
-+		spin_lock(&ctx->mtx);
 +		cdc_ncm_tx_timeout_start(ctx);
-+		spin_unlock(&ctx->mtx);
++		spin_unlock_bh(&ctx->mtx);
 +	} else if (ctx->netdev != NULL) {
++		spin_unlock_bh(&ctx->mtx);
++		netif_tx_lock_bh(ctx->netdev);
 +		usbnet_start_xmit(NULL, ctx->netdev);
++		netif_tx_unlock_bh(ctx->netdev);
 +	}
 +}
 +
@@ -1357,7 +1419,6 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +{
 +	struct sk_buff *skb_out;
 +	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)dev->data[0];
-+	u8 need_timer = 0;
 +
 +	/*
 +	 * The Ethernet API we are using does not support transmitting
@@ -1369,19 +1430,9 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +	if (ctx == NULL)
 +		goto error;
 +
-+	spin_lock(&ctx->mtx);
++	spin_lock_bh(&ctx->mtx);
 +	skb_out = cdc_ncm_fill_tx_frame(ctx, skb);
-+	if (ctx->tx_curr_skb != NULL)
-+		need_timer = 1;
-+
-+	/* Start timer, if there is a remaining skb */
-+	if (need_timer)
-+		cdc_ncm_tx_timeout_start(ctx);
-+
-+	if (skb_out)
-+		dev->net->stats.tx_packets += ctx->tx_curr_frame_num;
-+
-+	spin_unlock(&ctx->mtx);
++	spin_unlock_bh(&ctx->mtx);
 +	return skb_out;
 +
 +error:
@@ -1394,108 +1445,103 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +static int cdc_ncm_rx_fixup(struct usbnet *dev, struct sk_buff *skb_in)
 +{
 +	struct sk_buff *skb;
-+	struct cdc_ncm_ctx *ctx;
-+	int sumlen;
-+	int actlen;
-+	int temp;
++	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)dev->data[0];
++	int len;
 +	int nframes;
 +	int x;
 +	int offset;
++	struct usb_cdc_ncm_nth16 *nth16;
++	struct usb_cdc_ncm_ndp16 *ndp16;
++	struct usb_cdc_ncm_dpe16 *dpe16;
 +
-+	ctx = (struct cdc_ncm_ctx *)dev->data[0];
 +	if (ctx == NULL)
 +		goto error;
 +
-+	actlen = skb_in->len;
-+	sumlen = CDC_NCM_NTB_MAX_SIZE_RX;
-+
-+	if (actlen < (sizeof(ctx->rx_ncm.nth16) + sizeof(ctx->rx_ncm.ndp16))) {
++	if (skb_in->len < (sizeof(struct usb_cdc_ncm_nth16) +
++					sizeof(struct usb_cdc_ncm_ndp16))) {
 +		pr_debug("frame too short\n");
 +		goto error;
 +	}
 +
-+	memcpy(&(ctx->rx_ncm.nth16), ((u8 *)skb_in->data),
-+						sizeof(ctx->rx_ncm.nth16));
++	nth16 = (struct usb_cdc_ncm_nth16 *)skb_in->data;
 +
-+	if (le32_to_cpu(ctx->rx_ncm.nth16.dwSignature) !=
-+	    USB_CDC_NCM_NTH16_SIGN) {
++	if (le32_to_cpu(nth16->dwSignature) != USB_CDC_NCM_NTH16_SIGN) {
 +		pr_debug("invalid NTH16 signature <%u>\n",
-+			 le32_to_cpu(ctx->rx_ncm.nth16.dwSignature));
++					le32_to_cpu(nth16->dwSignature));
 +		goto error;
 +	}
 +
-+	temp = le16_to_cpu(ctx->rx_ncm.nth16.wBlockLength);
-+	if (temp > sumlen) {
-+		pr_debug("unsupported NTB block length %u/%u\n", temp, sumlen);
++	len = le16_to_cpu(nth16->wBlockLength);
++	if (len > ctx->rx_max) {
++		pr_debug("unsupported NTB block length %u/%u\n", len,
++								ctx->rx_max);
 +		goto error;
 +	}
 +
-+	temp = le16_to_cpu(ctx->rx_ncm.nth16.wNdpIndex);
-+	if ((temp + sizeof(ctx->rx_ncm.ndp16)) > actlen) {
-+		pr_debug("invalid DPT16 index\n");
++	if ((ctx->rx_seq + 1) != le16_to_cpu(nth16->wSequence) &&
++		(ctx->rx_seq || le16_to_cpu(nth16->wSequence)) &&
++		!((ctx->rx_seq == 0xffff) && !le16_to_cpu(nth16->wSequence))) {
++		pr_debug("sequence number glitch prev=%d curr=%d\n",
++				ctx->rx_seq, le16_to_cpu(nth16->wSequence));
++	}
++	ctx->rx_seq = le16_to_cpu(nth16->wSequence);
++
++	len = le16_to_cpu(nth16->wNdpIndex);
++	if ((len + sizeof(struct usb_cdc_ncm_ndp16)) > skb_in->len) {
++		pr_debug("invalid DPT16 index <%u>\n",
++					le16_to_cpu(nth16->wNdpIndex));
 +		goto error;
 +	}
 +
-+	memcpy(&(ctx->rx_ncm.ndp16), ((u8 *)skb_in->data) + temp,
-+						sizeof(ctx->rx_ncm.ndp16));
++	ndp16 = (struct usb_cdc_ncm_ndp16 *)(((u8 *)skb_in->data) + len);
 +
-+	if (le32_to_cpu(ctx->rx_ncm.ndp16.dwSignature) !=
-+	    USB_CDC_NCM_NDP16_NOCRC_SIGN) {
++	if (le32_to_cpu(ndp16->dwSignature) != USB_CDC_NCM_NDP16_NOCRC_SIGN) {
 +		pr_debug("invalid DPT16 signature <%u>\n",
-+			 le32_to_cpu(ctx->rx_ncm.ndp16.dwSignature));
++					le32_to_cpu(ndp16->dwSignature));
 +		goto error;
 +	}
 +
-+	if (le16_to_cpu(ctx->rx_ncm.ndp16.wLength) <
-+	    USB_CDC_NCM_NDP16_LENGTH_MIN) {
++	if (le16_to_cpu(ndp16->wLength) < USB_CDC_NCM_NDP16_LENGTH_MIN) {
 +		pr_debug("invalid DPT16 length <%u>\n",
-+			 le32_to_cpu(ctx->rx_ncm.ndp16.dwSignature));
++					le32_to_cpu(ndp16->dwSignature));
 +		goto error;
 +	}
 +
-+	nframes = ((le16_to_cpu(ctx->rx_ncm.ndp16.wLength) -
++	nframes = ((le16_to_cpu(ndp16->wLength) -
 +					sizeof(struct usb_cdc_ncm_ndp16)) /
 +					sizeof(struct usb_cdc_ncm_dpe16));
 +	nframes--; /* we process NDP entries except for the last one */
 +
-+	pr_debug("nframes = %u\n", nframes);
++	len += sizeof(struct usb_cdc_ncm_ndp16);
 +
-+	temp += sizeof(ctx->rx_ncm.ndp16);
-+
-+	if ((temp + nframes * (sizeof(struct usb_cdc_ncm_dpe16))) > actlen) {
++	if ((len + nframes * (sizeof(struct usb_cdc_ncm_dpe16))) >
++								skb_in->len) {
 +		pr_debug("Invalid nframes = %d\n", nframes);
 +		goto error;
 +	}
 +
-+	if (nframes > CDC_NCM_DPT_DATAGRAMS_MAX) {
-+		pr_debug("Truncating number of frames from %u to %u\n",
-+					nframes, CDC_NCM_DPT_DATAGRAMS_MAX);
-+		nframes = CDC_NCM_DPT_DATAGRAMS_MAX;
-+	}
++	dpe16 = (struct usb_cdc_ncm_dpe16 *)(((u8 *)skb_in->data) + len);
 +
-+	memcpy(&(ctx->rx_ncm.dpe16), ((u8 *)skb_in->data) + temp,
-+				nframes * (sizeof(struct usb_cdc_ncm_dpe16)));
-+
-+	for (x = 0; x < nframes; x++) {
-+		offset = le16_to_cpu(ctx->rx_ncm.dpe16[x].wDatagramIndex);
-+		temp = le16_to_cpu(ctx->rx_ncm.dpe16[x].wDatagramLength);
++	for (x = 0; x < nframes; x++, dpe16++) {
++		offset = le16_to_cpu(dpe16->wDatagramIndex);
++		len = le16_to_cpu(dpe16->wDatagramLength);
 +
 +		/*
 +		 * CDC NCM ch. 3.7
 +		 * All entries after first NULL entry are to be ignored
 +		 */
-+		if ((offset == 0) || (temp == 0)) {
++		if ((offset == 0) || (len == 0)) {
 +			if (!x)
 +				goto error; /* empty NTB */
 +			break;
 +		}
 +
 +		/* sanity checking */
-+		if (((offset + temp) > actlen) ||
-+		    (temp > CDC_NCM_MAX_DATAGRAM_SIZE) || (temp < ETH_HLEN)) {
++		if (((offset + len) > skb_in->len) ||
++				(len > ctx->rx_max) || (len < ETH_HLEN)) {
 +			pr_debug("invalid frame detected (ignored)"
 +					"offset[%u]=%u, length=%u, skb=%p\n",
-+					x, offset, temp, skb_in);
++					x, offset, len, skb_in);
 +			if (!x)
 +				goto error;
 +			break;
@@ -1504,9 +1550,9 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +			skb = skb_clone(skb_in, GFP_ATOMIC);
 +			if (!skb)
 +				goto error;
-+			skb->len = temp;
++			skb->len = len;
 +			skb->data = ((u8 *)skb_in->data) + offset;
-+			skb_set_tail_pointer(skb, temp);
++			skb_set_tail_pointer(skb, len);
 +			usbnet_skb_return(dev, skb);
 +		}
 +	}
@@ -1706,48 +1752,11 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/cdc_n
 +MODULE_AUTHOR("Hans Petter Selasky");
 +MODULE_DESCRIPTION("USB CDC NCM host driver");
 +MODULE_LICENSE("Dual BSD/GPL");
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/Kconfig linux-2.6.35.3/drivers/net/usb/Kconfig
---- linux-2.6.35.3.orig/drivers/net/usb/Kconfig	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/drivers/net/usb/Kconfig	2012-02-15 17:12:40.000000000 +0000
-@@ -196,6 +196,25 @@
- 	  IEEE 802 "local assignment" bit is set in the address, a "usbX"
- 	  name is used instead.
- 
-+config USB_NET_CDC_NCM
-+	tristate "CDC NCM support"
-+	depends on USB_USBNET
-+	default y
-+	help
-+	  This driver provides support for CDC NCM (Network Control Model
-+	  Device USB Class Specification). The CDC NCM specification is
-+	  available from <http://www.usb.org/>.
-+
-+	  Say "y" to link the driver statically, or "m" to build a
-+	  dynamically linked module.
-+
-+	  This driver should work with at least the following devices:
-+	    * ST-Ericsson M700 LTE FDD/TDD Mobile Broadband Modem (ref. design)
-+	    * ST-Ericsson M5730 HSPA+ Mobile Broadband Modem (reference design)
-+	    * ST-Ericsson M570 HSPA+ Mobile Broadband Modem (reference design)
-+	    * ST-Ericsson M343 HSPA Mobile Broadband Modem (reference design)
-+	    * Ericsson F5521gw Mobile Broadband Module
-+
- config USB_NET_DM9601
- 	tristate "Davicom DM9601 based USB 1.1 10/100 ethernet devices"
- 	depends on USB_USBNET
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/Makefile linux-2.6.35.3/drivers/net/usb/Makefile
---- linux-2.6.35.3.orig/drivers/net/usb/Makefile	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/drivers/net/usb/Makefile	2012-02-15 17:12:40.000000000 +0000
-@@ -25,4 +25,5 @@
- obj-$(CONFIG_USB_CDC_PHONET)	+= cdc-phonet.o
- obj-$(CONFIG_USB_IPHETH)	+= ipheth.o
- obj-$(CONFIG_USB_SIERRA_NET)	+= sierra_net.o
-+obj-$(CONFIG_USB_NET_CDC_NCM)	+= cdc_ncm.o
- 
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbnet.c linux-2.6.35.3/drivers/net/usb/usbnet.c
---- linux-2.6.35.3.orig/drivers/net/usb/usbnet.c	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/drivers/net/usb/usbnet.c	2012-02-15 17:12:40.000000000 +0000
-@@ -395,14 +395,21 @@
+diff --git a/drivers/net/usb/usbnet.c b/drivers/net/usb/usbnet.c
+index 81c76ad..9498fc3 100644
+--- a/drivers/net/usb/usbnet.c
++++ b/drivers/net/usb/usbnet.c
+@@ -395,14 +395,21 @@ static inline void rx_process (struct usbnet *dev, struct sk_buff *skb)
  		goto error;
  	// else network stack removes extra byte if we forced a short packet
  
@@ -1776,7 +1785,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbne
  }
  
  /*-------------------------------------------------------------------------*/
-@@ -972,7 +979,8 @@
+@@ -972,7 +979,8 @@ static void tx_complete (struct urb *urb)
  	struct usbnet		*dev = entry->dev;
  
  	if (urb->status == 0) {
@@ -1786,7 +1795,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbne
  		dev->net->stats.tx_bytes += entry->length;
  	} else {
  		dev->net->stats.tx_errors++;
-@@ -1045,8 +1053,13 @@
+@@ -1045,8 +1053,13 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
  	if (info->tx_fixup) {
  		skb = info->tx_fixup (dev, skb, GFP_ATOMIC);
  		if (!skb) {
@@ -1802,7 +1811,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbne
  		}
  	}
  	length = skb->len;
-@@ -1068,13 +1081,18 @@
+@@ -1068,13 +1081,18 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
  	/* don't assume the hardware handles USB_ZERO_PACKET
  	 * NOTE:  strictly conforming cdc-ether devices should expect
  	 * the ZLP here, but ignore the one-byte packet.
@@ -1825,7 +1834,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbne
  			}
  		} else
  			urb->transfer_flags |= URB_ZERO_PACKET;
-@@ -1123,6 +1141,7 @@
+@@ -1123,6 +1141,7 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
  		netif_dbg(dev, tx_err, dev->net, "drop, code %d\n", retval);
  drop:
  		dev->net->stats.tx_dropped++;
@@ -1833,7 +1842,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbne
  		if (skb)
  			dev_kfree_skb_any (skb);
  		usb_free_urb (urb);
-@@ -1346,7 +1365,8 @@
+@@ -1346,7 +1365,8 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
  		// else "eth%d" when there's reasonable doubt.  userspace
  		// can rename the link if it knows better.
  		if ((dev->driver_info->flags & FLAG_ETHER) != 0 &&
@@ -1843,7 +1852,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbne
  			strcpy (net->name, "eth%d");
  		/* WLAN devices should always be named "wlan%d" */
  		if ((dev->driver_info->flags & FLAG_WLAN) != 0)
-@@ -1378,7 +1398,12 @@
+@@ -1378,7 +1398,12 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
  
  	if (!dev->rx_urb_size)
  		dev->rx_urb_size = dev->hard_mtu;
@@ -1857,10 +1866,11 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/net/usb/usbne
  
  	if ((dev->driver_info->flags & FLAG_WLAN) != 0)
  		SET_NETDEV_DEVTYPE(net, &wlan_type);
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc-acm.c linux-2.6.35.3/drivers/usb/class/cdc-acm.c
---- linux-2.6.35.3.orig/drivers/usb/class/cdc-acm.c	2012-03-15 16:41:46.800127284 +0000
-+++ linux-2.6.35.3/drivers/usb/class/cdc-acm.c	2012-03-08 11:43:17.000000000 +0000
-@@ -363,6 +363,7 @@
+diff --git a/drivers/usb/class/cdc-acm.c b/drivers/usb/class/cdc-acm.c
+index 40f6d85..d32bad4 100644
+--- a/drivers/usb/class/cdc-acm.c
++++ b/drivers/usb/class/cdc-acm.c
+@@ -363,6 +363,7 @@ static void acm_read_bulk(struct urb *urb)
  		dev_dbg(&acm->data->dev, "bulk rx status %d\n", status);
  
  	buf = rcv->buffer;
@@ -1868,7 +1878,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  	buf->size = urb->actual_length;
  
  	if (likely(status == 0)) {
-@@ -392,6 +393,7 @@
+@@ -392,6 +393,7 @@ static void acm_rx_tasklet(unsigned long _acm)
  	struct acm_ru *rcv;
  	unsigned long flags;
  	unsigned char throttled;
@@ -1876,7 +1886,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  
  	dbg("Entering acm_rx_tasklet");
  
-@@ -423,12 +425,14 @@
+@@ -423,12 +425,14 @@ next_buffer:
  
  	dbg("acm_rx_tasklet: procesing buf 0x%p, size = %d", buf, buf->size);
  
@@ -1892,7 +1902,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  			tty_flip_buffer_push(tty);
  		} else {
  			tty_kref_put(tty);
-@@ -440,9 +444,24 @@
+@@ -440,9 +444,24 @@ next_buffer:
  		}
  	}
  
@@ -1920,7 +1930,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  	goto next_buffer;
  
  urbs:
-@@ -519,14 +538,14 @@
+@@ -519,14 +538,14 @@ static void acm_write_bulk(struct urb *urb)
  	acm_write_done(acm, wb);
  	spin_unlock_irqrestore(&acm->write_lock, flags);
  	if (ACM_READY(acm))
@@ -1938,7 +1948,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  	struct tty_struct *tty;
  
  	dev_vdbg(&acm->data->dev, "tx work\n");
-@@ -537,6 +556,42 @@
+@@ -537,6 +556,42 @@ static void acm_softint(struct work_struct *work)
  	tty_kref_put(tty);
  }
  
@@ -1981,7 +1991,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  /*
   * TTY handlers
   */
-@@ -640,7 +695,6 @@
+@@ -640,7 +695,6 @@ static int acm_tty_chars_in_buffer(struct tty_struct *tty);
  static void acm_port_down(struct acm *acm, int drain)
  {
  	int i, nr = acm->rx_buflimit;
@@ -1989,7 +1999,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  	if (acm->dev) {
  		usb_autopm_get_interface(acm->control);
  		acm_set_control(acm, acm->ctrlout = 0);
-@@ -658,14 +712,23 @@
+@@ -658,14 +712,23 @@ static void acm_port_down(struct acm *acm, int drain)
  		acm->control->needs_remote_wakeup = 0;
  		usb_autopm_put_interface(acm->control);
  	}
@@ -2015,7 +2025,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  }
  
  static void acm_tty_close(struct tty_struct *tty, struct file *filp)
-@@ -676,8 +739,9 @@
+@@ -676,8 +739,9 @@ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
  	   shutdown */
  	if (!acm)
  		return;
@@ -2026,7 +2036,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  		if (!acm->dev) {
  			tty_port_tty_set(&acm->port, NULL);
  			acm_tty_unregister(acm);
-@@ -689,6 +753,7 @@
+@@ -689,6 +753,7 @@ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
  	acm_port_down(acm, 0);
  	tty_port_close_end(&acm->port, tty);
  	tty_port_tty_set(&acm->port, NULL);
@@ -2034,7 +2044,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  }
  
  static int acm_tty_write(struct tty_struct *tty,
-@@ -972,7 +1037,8 @@
+@@ -972,7 +1037,8 @@ static int acm_probe(struct usb_interface *intf,
  	}
  
  	if (!buflen) {
@@ -2044,7 +2054,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  				intf->cur_altsetting->endpoint->extra) {
  			dev_dbg(&intf->dev,
  				"Seeking extra descriptors on endpoint\n");
-@@ -1165,7 +1231,8 @@
+@@ -1165,7 +1231,8 @@ made_compressed_probe:
  	acm->rx_buflimit = num_rx_buf;
  	acm->urb_task.func = acm_rx_tasklet;
  	acm->urb_task.data = (unsigned long) acm;
@@ -2054,7 +2064,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  	init_waitqueue_head(&acm->drain_wait);
  	spin_lock_init(&acm->throttle_lock);
  	spin_lock_init(&acm->write_lock);
-@@ -1322,6 +1389,7 @@
+@@ -1322,6 +1389,7 @@ static void stop_data_traffic(struct acm *acm)
  	dbg("Entering stop_data_traffic");
  
  	tasklet_disable(&acm->urb_task);
@@ -2062,7 +2072,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  
  	usb_kill_urb(acm->ctrlurb);
  	for (i = 0; i < ACM_NW; i++)
-@@ -1331,7 +1399,7 @@
+@@ -1331,7 +1399,7 @@ static void stop_data_traffic(struct acm *acm)
  
  	tasklet_enable(&acm->urb_task);
  
@@ -2071,7 +2081,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  }
  
  static void acm_disconnect(struct usb_interface *intf)
-@@ -1488,6 +1556,11 @@
+@@ -1488,6 +1556,11 @@ static int acm_reset_resume(struct usb_interface *intf)
  		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
  		USB_CDC_ACM_PROTO_VENDOR)
  
@@ -2083,7 +2093,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  /*
   * USB driver structure.
   */
-@@ -1598,6 +1671,17 @@
+@@ -1598,6 +1671,17 @@ static const struct usb_device_id acm_ids[] = {
  	{ NOKIA_PCSUITE_ACM_INFO(0x0108), }, /* Nokia 5320 XpressMusic 2G */
  	{ NOKIA_PCSUITE_ACM_INFO(0x01f5), }, /* Nokia N97, RM-505 */
  	{ NOKIA_PCSUITE_ACM_INFO(0x02e3), }, /* Nokia 5230, RM-588 */
@@ -2101,10 +2111,11 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  
  	/* NOTE: non-Nokia COMM/ACM/0xff is likely MSFT RNDIS... NOT a modem! */
  
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc-acm.h linux-2.6.35.3/drivers/usb/class/cdc-acm.h
---- linux-2.6.35.3.orig/drivers/usb/class/cdc-acm.h	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/drivers/usb/class/cdc-acm.h	2011-03-23 16:53:38.000000000 +0000
-@@ -75,6 +75,7 @@
+diff --git a/drivers/usb/class/cdc-acm.h b/drivers/usb/class/cdc-acm.h
+index 5eeb570..b7cf391 100644
+--- a/drivers/usb/class/cdc-acm.h
++++ b/drivers/usb/class/cdc-acm.h
+@@ -75,6 +75,7 @@ struct acm_rb {
  	struct list_head	list;
  	int			size;
  	unsigned char		*base;
@@ -2112,7 +2123,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  	dma_addr_t		dma;
  };
  
-@@ -111,7 +112,8 @@
+@@ -111,7 +112,8 @@ struct acm {
  	spinlock_t write_lock;
  	struct mutex mutex;
  	struct usb_cdc_line_coding line;		/* bits, stop, parity */
@@ -2122,9 +2133,10 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/drivers/usb/class/cdc
  	wait_queue_head_t drain_wait;			/* close processing */
  	struct tasklet_struct urb_task;                 /* rx processing */
  	spinlock_t throttle_lock;			/* synchronize throtteling and read callback */
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/cdc.h linux-2.6.35.3/include/linux/usb/cdc.h
---- linux-2.6.35.3.orig/include/linux/usb/cdc.h	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/include/linux/usb/cdc.h	2012-02-15 17:12:40.000000000 +0000
+diff --git a/include/linux/usb/cdc.h b/include/linux/usb/cdc.h
+index c117a68..49e5fc3 100644
+--- a/include/linux/usb/cdc.h
++++ b/include/linux/usb/cdc.h
 @@ -32,6 +32,8 @@
  
  #define USB_CDC_PROTO_EEM			7
@@ -2134,7 +2146,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/cdc
  /*-------------------------------------------------------------------------*/
  
  /*
-@@ -269,18 +271,23 @@
+@@ -269,18 +271,23 @@ struct usb_cdc_notification {
  	__le16	wLength;
  } __attribute__ ((packed));
  
@@ -2161,7 +2173,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/cdc
  	__le32	dwNtbInMaxSize;
  	__le16	wNdpInDivisor;
  	__le16	wNdpInPayloadRemainder;
-@@ -290,22 +297,22 @@
+@@ -290,22 +297,22 @@ struct usb_cdc_ncm_ntb_parameter {
  	__le16	wNdpOutDivisor;
  	__le16	wNdpOutPayloadRemainder;
  	__le16	wNdpOutAlignment;
@@ -2188,7 +2200,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/cdc
  } __attribute__ ((packed));
  
  struct usb_cdc_ncm_nth32 {
-@@ -313,32 +320,93 @@
+@@ -313,32 +320,93 @@ struct usb_cdc_ncm_nth32 {
  	__le16	wHeaderLength;
  	__le16	wSequence;
  	__le32	dwBlockLength;
@@ -2208,13 +2220,13 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/cdc
 +#define USB_CDC_NCM_NDP16_NOCRC_SIGN	0x304D434E /* NCM0 */
 +#define USB_CDC_NCM_NDP32_CRC_SIGN	0x316D636E /* ncm1 */
 +#define USB_CDC_NCM_NDP32_NOCRC_SIGN	0x306D636E /* ncm0 */
-+
+ 
 +/* 16-bit NCM Datagram Pointer Entry */
 +struct usb_cdc_ncm_dpe16 {
 +	__le16	wDatagramIndex;
 +	__le16	wDatagramLength;
 +} __attribute__((__packed__));
- 
++
 +/* 16-bit NCM Datagram Pointer Table */
  struct usb_cdc_ncm_ndp16 {
  	__le32	dwSignature;
@@ -2291,10 +2303,11 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/cdc
 +#define USB_CDC_NCM_CRC_APPENDED			0x01
 +
  #endif /* __LINUX_USB_CDC_H */
-diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/usbnet.h linux-2.6.35.3/include/linux/usb/usbnet.h
---- linux-2.6.35.3.orig/include/linux/usb/usbnet.h	2010-08-20 19:55:55.000000000 +0100
-+++ linux-2.6.35.3/include/linux/usb/usbnet.h	2012-02-15 17:12:40.000000000 +0000
-@@ -68,6 +68,7 @@
+diff --git a/include/linux/usb/usbnet.h b/include/linux/usb/usbnet.h
+index 7ae27a4..9f5f4ae 100644
+--- a/include/linux/usb/usbnet.h
++++ b/include/linux/usb/usbnet.h
+@@ -68,6 +68,7 @@ struct usbnet {
  #		define EVENT_RX_PAUSED	5
  #		define EVENT_DEV_WAKING 6
  #		define EVENT_DEV_ASLEEP 7
@@ -2302,7 +2315,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/usb
  };
  
  static inline struct usb_driver *driver_of(struct usb_interface *intf)
-@@ -97,6 +98,14 @@
+@@ -97,6 +98,14 @@ struct driver_info {
  
  #define FLAG_LINK_INTR	0x0800		/* updates link (carrier) status */
  
@@ -2317,7 +2330,7 @@ diff -X /home/tg/tmp/exclude.list -urN linux-2.6.35.3.orig/include/linux/usb/usb
  	/* init device ... can sleep, or cause probe() failure */
  	int	(*bind)(struct usbnet *, struct usb_interface *);
  
-@@ -166,7 +175,9 @@
+@@ -166,7 +175,9 @@ struct cdc_state {
  };
  
  extern int usbnet_generic_cdc_bind(struct usbnet *, struct usb_interface *);

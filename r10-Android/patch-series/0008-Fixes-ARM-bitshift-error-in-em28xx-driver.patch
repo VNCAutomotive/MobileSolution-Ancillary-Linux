@@ -1,7 +1,7 @@
-From 30b25aa81ed8793a173345c57967332d7412a8f6 Mon Sep 17 00:00:00 2001
+From e755908ab667f240dd51460ad1cb64bdbf48fefe Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Thu, 2 Sep 2010 10:46:20 +0100
-Subject: [PATCH 08/10] Fixes ARM bitshift error in em28xx driver
+Subject: [PATCH 08/13] Fixes ARM bitshift error in em28xx driver
 
 This fixes an issue with bitshifting on ARM builds of em28xx.
 ---

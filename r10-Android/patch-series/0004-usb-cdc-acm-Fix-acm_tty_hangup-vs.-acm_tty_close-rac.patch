@@ -1,7 +1,7 @@
-From dabebec7f2f8a1b7c3a6c37b51fd919339125769 Mon Sep 17 00:00:00 2001
+From 1ee2b14b4e0567b215f541aa089e83015519047f Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Sat, 17 Dec 2011 10:55:10 +0100
-Subject: [PATCH 04/10] usb: cdc-acm: Fix acm_tty_hangup() vs. acm_tty_close() race
+Subject: [PATCH 04/13] usb: cdc-acm: Fix acm_tty_hangup() vs. acm_tty_close() race
 
 Was from "Thilo-Alexander Ginkel"
 

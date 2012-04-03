@@ -1,7 +1,7 @@
-From e61747ca03d4d9aaa826eee9ab497a18e0b7d0df Mon Sep 17 00:00:00 2001
+From e964b9b4d5fec5b4813991a379e1ead37c7c71f4 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@gmail.com>
 Date: Tue, 5 Oct 2010 17:20:16 +0200
-Subject: [PATCH 09/10] HID: hidraw, fix a NULL pointer dereference in hidraw_ioctl
+Subject: [PATCH 09/13] HID: hidraw, fix a NULL pointer dereference in hidraw_ioctl
 
 BUG: unable to handle kernel NULL pointer dereference at 0000000000000028
 IP: [<ffffffffa02c66b4>] hidraw_ioctl+0xfc/0x32c [hid]

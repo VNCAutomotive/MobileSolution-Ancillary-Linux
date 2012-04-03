@@ -1,29 +1,449 @@
-From c6a30d881abd17ddfd193b99ac2bca7939388140 Mon Sep 17 00:00:00 2001
+From a98e3505af217e91f1faef1e24d1acae771cbfe4 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
-Date: Sat, 17 Dec 2011 10:55:10 +0100
-Subject: [PATCH 05/13] usb: cdc-ncm: Backport of NCM driver
+Date: Tue, 3 Apr 2012 11:10:37 +0100
+Subject: [PATCH 1/4] This is a composite patch, containing all changes for the 2.1 release.
 
-This is a backport of the CDC NCM driver.
+This patch contains the following series of patches:
 
-It also includes the following patches:
+* 0001-USB-cdc-acm-Fixing-crash-when-ACM-probing-interfaces.patch
+* 0002-acm-data-loss-fix.patch
+* 0003-commit-5dc2470.patch
+* 0004-acm-disconnect-hang.patch
+* 0005-cdc-ncm-backport-with-delayed-ifup-fix.patch
+* 0006-commit-1a8e8fa.patch
+* 0007-commit-33d6eb5.patch
+* 0008-em28xx-arm-bitshift.patch
+* 0009-hidraw_crash_1.patch
+* 0010-hidraw_crash_2.patch
 
-https://lkml.org/lkml/2012/2/14/207
- - usb: cdc-ncm: Increase maximum allowed datagram size
-
-http://comments.gmane.org/gmane.linux.network/221134
- - Delay selecting alternate setting in CDC NCM until network interface is raised
-
-Signed-off-by: Toby Gray <toby.gray@realvnc.com>
+These are all in one patch for historical reasons. Future patches should
+add extra patches to the patch series.
 ---
- drivers/net/usb/Kconfig    |   19 +
- drivers/net/usb/Makefile   |    1 +
- drivers/net/usb/cdc_ncm.c  | 1297 ++++++++++++++++++++++++++++++++++++++++++++
- drivers/net/usb/usbnet.c   |   57 ++-
- include/linux/usb/cdc.h    |  100 +++-
- include/linux/usb/usbnet.h |   11 +
- 6 files changed, 1453 insertions(+), 32 deletions(-)
+ drivers/hid/hidraw.c                     |   11 +
+ drivers/hid/usbhid/hiddev.c              |  239 +++---
+ drivers/media/video/em28xx/em28xx-core.c |    2 -
+ drivers/net/usb/Kconfig                  |   19 +
+ drivers/net/usb/Makefile                 |    1 +
+ drivers/net/usb/cdc_ncm.c                | 1297 ++++++++++++++++++++++++++++++
+ drivers/net/usb/usbnet.c                 |   57 +-
+ drivers/usb/class/cdc-acm.c              |  112 +++-
+ drivers/usb/class/cdc-acm.h              |    4 +-
+ include/linux/usb/cdc.h                  |  100 ++-
+ include/linux/usb/usbnet.h               |   11 +
+ 11 files changed, 1692 insertions(+), 161 deletions(-)
  create mode 100644 drivers/net/usb/cdc_ncm.c
 
+diff --git a/drivers/hid/hidraw.c b/drivers/hid/hidraw.c
+index 3ccd478..7dca2fa 100644
+--- a/drivers/hid/hidraw.c
++++ b/drivers/hid/hidraw.c
+@@ -111,6 +111,12 @@ static ssize_t hidraw_write(struct file *file, const char __user *buffer, size_t
+ 	int ret = 0;
+ 
+ 	mutex_lock(&minors_lock);
++
++	if (!hidraw_table[minor]) {
++		ret = -ENODEV;
++		goto out;
++	}
++
+ 	dev = hidraw_table[minor]->hid;
+ 
+ 	if (!dev->hid_output_raw_report) {
+@@ -246,6 +252,10 @@ static long hidraw_ioctl(struct file *file, unsigned int cmd,
+ 
+ 	mutex_lock(&minors_lock);
+ 	dev = hidraw_table[minor];
++	if (!dev) {
++		ret = -ENODEV;
++		goto out;
++	}
+ 
+ 	switch (cmd) {
+ 		case HIDIOCGRDESCSIZE:
+@@ -319,6 +329,7 @@ static long hidraw_ioctl(struct file *file, unsigned int cmd,
+ 
+ 		ret = -ENOTTY;
+ 	}
++out:
+ 	mutex_unlock(&minors_lock);
+ 	return ret;
+ }
+diff --git a/drivers/hid/usbhid/hiddev.c b/drivers/hid/usbhid/hiddev.c
+index c24d2fa..0445a86 100644
+--- a/drivers/hid/usbhid/hiddev.c
++++ b/drivers/hid/usbhid/hiddev.c
+@@ -592,161 +592,168 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ {
+ 	struct hiddev_list *list = file->private_data;
+ 	struct hiddev *hiddev = list->hiddev;
+-	struct hid_device *hid = hiddev->hid;
+-	struct usb_device *dev = hid_to_usb_dev(hid);
++	struct hid_device *hid;
+ 	struct hiddev_collection_info cinfo;
+ 	struct hiddev_report_info rinfo;
+ 	struct hiddev_field_info finfo;
+ 	struct hiddev_devinfo dinfo;
+ 	struct hid_report *report;
+ 	struct hid_field *field;
+-	struct usbhid_device *usbhid = hid->driver_data;
+ 	void __user *user_arg = (void __user *)arg;
+-	int i, r;
+-	
++	int i, r = -EINVAL;
++
+ 	/* Called without BKL by compat methods so no BKL taken */
+ 
+-	/* FIXME: Who or what stop this racing with a disconnect ?? */
+-	if (!hiddev->exist)
+-		return -EIO;
++	mutex_lock(&hiddev->existancelock);
++	if (!hiddev->exist) {
++		r = -ENODEV;
++		goto ret_unlock;
++	}
++
++	hid = hiddev->hid;
+ 
+ 	switch (cmd) {
+ 
+ 	case HIDIOCGVERSION:
+-		return put_user(HID_VERSION, (int __user *)arg);
++		r = put_user(HID_VERSION, (int __user *)arg) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	case HIDIOCAPPLICATION:
+ 		if (arg < 0 || arg >= hid->maxapplication)
+-			return -EINVAL;
++			break;
+ 
+ 		for (i = 0; i < hid->maxcollection; i++)
+ 			if (hid->collection[i].type ==
+ 			    HID_COLLECTION_APPLICATION && arg-- == 0)
+ 				break;
+ 
+-		if (i == hid->maxcollection)
+-			return -EINVAL;
+-
+-		return hid->collection[i].usage;
++		if (i < hid->maxcollection)
++			r = hid->collection[i].usage;
++		break;
+ 
+ 	case HIDIOCGDEVINFO:
+-		dinfo.bustype = BUS_USB;
+-		dinfo.busnum = dev->bus->busnum;
+-		dinfo.devnum = dev->devnum;
+-		dinfo.ifnum = usbhid->ifnum;
+-		dinfo.vendor = le16_to_cpu(dev->descriptor.idVendor);
+-		dinfo.product = le16_to_cpu(dev->descriptor.idProduct);
+-		dinfo.version = le16_to_cpu(dev->descriptor.bcdDevice);
+-		dinfo.num_applications = hid->maxapplication;
+-		if (copy_to_user(user_arg, &dinfo, sizeof(dinfo)))
+-			return -EFAULT;
+-
+-		return 0;
++		{
++			struct usb_device *dev = hid_to_usb_dev(hid);
++			struct usbhid_device *usbhid = hid->driver_data;
++
++			dinfo.bustype = BUS_USB;
++			dinfo.busnum = dev->bus->busnum;
++			dinfo.devnum = dev->devnum;
++			dinfo.ifnum = usbhid->ifnum;
++			dinfo.vendor = le16_to_cpu(dev->descriptor.idVendor);
++			dinfo.product = le16_to_cpu(dev->descriptor.idProduct);
++			dinfo.version = le16_to_cpu(dev->descriptor.bcdDevice);
++			dinfo.num_applications = hid->maxapplication;
++
++			r = copy_to_user(user_arg, &dinfo, sizeof(dinfo)) ?
++				-EFAULT : 0;
++			break;
++		}
+ 
+ 	case HIDIOCGFLAG:
+-		if (put_user(list->flags, (int __user *)arg))
+-			return -EFAULT;
+-
+-		return 0;
++		r = put_user(list->flags, (int __user *)arg) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	case HIDIOCSFLAG:
+ 		{
+ 			int newflags;
+-			if (get_user(newflags, (int __user *)arg))
+-				return -EFAULT;
++
++			if (get_user(newflags, (int __user *)arg)) {
++				r = -EFAULT;
++				break;
++			}
+ 
+ 			if ((newflags & ~HIDDEV_FLAGS) != 0 ||
+ 			    ((newflags & HIDDEV_FLAG_REPORT) != 0 &&
+ 			     (newflags & HIDDEV_FLAG_UREF) == 0))
+-				return -EINVAL;
++				break;
+ 
+ 			list->flags = newflags;
+ 
+-			return 0;
++			r = 0;
++			break;
+ 		}
+ 
+ 	case HIDIOCGSTRING:
+-		mutex_lock(&hiddev->existancelock);
+-		if (hiddev->exist)
+-			r = hiddev_ioctl_string(hiddev, cmd, user_arg);
+-		else
+-			r = -ENODEV;
+-		mutex_unlock(&hiddev->existancelock);
+-		return r;
++		r = hiddev_ioctl_string(hiddev, cmd, user_arg);
++		break;
+ 
+ 	case HIDIOCINITREPORT:
+-		mutex_lock(&hiddev->existancelock);
+-		if (!hiddev->exist) {
+-			mutex_unlock(&hiddev->existancelock);
+-			return -ENODEV;
+-		}
+ 		usbhid_init_reports(hid);
+-		mutex_unlock(&hiddev->existancelock);
+-
+-		return 0;
++		r = 0;
++		break;
+ 
+ 	case HIDIOCGREPORT:
+-		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo)))
+-			return -EFAULT;
++		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo))) {
++			r = -EFAULT;
++			break;
++		}
+ 
+ 		if (rinfo.report_type == HID_REPORT_TYPE_OUTPUT)
+-			return -EINVAL;
++			break;
+ 
+-		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
+-			return -EINVAL;
++		report = hiddev_lookup_report(hid, &rinfo);
++		if (report == NULL)
++			break;
+ 
+-		mutex_lock(&hiddev->existancelock);
+-		if (hiddev->exist) {
+-			usbhid_submit_report(hid, report, USB_DIR_IN);
+-			usbhid_wait_io(hid);
+-		}
+-		mutex_unlock(&hiddev->existancelock);
++		usbhid_submit_report(hid, report, USB_DIR_IN);
++		usbhid_wait_io(hid);
+ 
+-		return 0;
++		r = 0;
++		break;
+ 
+ 	case HIDIOCSREPORT:
+-		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo)))
+-			return -EFAULT;
++		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo))) {
++			r = -EFAULT;
++			break;
++		}
+ 
+ 		if (rinfo.report_type == HID_REPORT_TYPE_INPUT)
+-			return -EINVAL;
++			break;
+ 
+-		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
+-			return -EINVAL;
++		report = hiddev_lookup_report(hid, &rinfo);
++		if (report == NULL)
++			break;
+ 
+-		mutex_lock(&hiddev->existancelock);
+-		if (hiddev->exist) {
+-			usbhid_submit_report(hid, report, USB_DIR_OUT);
+-			usbhid_wait_io(hid);
+-		}
+-		mutex_unlock(&hiddev->existancelock);
++		usbhid_submit_report(hid, report, USB_DIR_OUT);
++		usbhid_wait_io(hid);
+ 
+-		return 0;
++		r = 0;
++		break;
+ 
+ 	case HIDIOCGREPORTINFO:
+-		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo)))
+-			return -EFAULT;
++		if (copy_from_user(&rinfo, user_arg, sizeof(rinfo))) {
++			r = -EFAULT;
++			break;
++		}
+ 
+-		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
+-			return -EINVAL;
++		report = hiddev_lookup_report(hid, &rinfo);
++		if (report == NULL)
++			break;
+ 
+ 		rinfo.num_fields = report->maxfield;
+ 
+-		if (copy_to_user(user_arg, &rinfo, sizeof(rinfo)))
+-			return -EFAULT;
+-
+-		return 0;
++		r = copy_to_user(user_arg, &rinfo, sizeof(rinfo)) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	case HIDIOCGFIELDINFO:
+-		if (copy_from_user(&finfo, user_arg, sizeof(finfo)))
+-			return -EFAULT;
++		if (copy_from_user(&finfo, user_arg, sizeof(finfo))) {
++			r = -EFAULT;
++			break;
++		}
++
+ 		rinfo.report_type = finfo.report_type;
+ 		rinfo.report_id = finfo.report_id;
+-		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
+-			return -EINVAL;
++
++		report = hiddev_lookup_report(hid, &rinfo);
++		if (report == NULL)
++			break;
+ 
+ 		if (finfo.field_index >= report->maxfield)
+-			return -EINVAL;
++			break;
+ 
+ 		field = report->field[finfo.field_index];
+ 		memset(&finfo, 0, sizeof(finfo));
+@@ -765,10 +772,9 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 		finfo.unit_exponent = field->unit_exponent;
+ 		finfo.unit = field->unit;
+ 
+-		if (copy_to_user(user_arg, &finfo, sizeof(finfo)))
+-			return -EFAULT;
+-
+-		return 0;
++		r = copy_to_user(user_arg, &finfo, sizeof(finfo)) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	case HIDIOCGUCODE:
+ 		/* fall through */
+@@ -777,57 +783,66 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 	case HIDIOCGUSAGES:
+ 	case HIDIOCSUSAGES:
+ 	case HIDIOCGCOLLECTIONINDEX:
+-		mutex_lock(&hiddev->existancelock);
+-		if (hiddev->exist)
+-			r = hiddev_ioctl_usage(hiddev, cmd, user_arg);
+-		else
+-			r = -ENODEV;
+-		mutex_unlock(&hiddev->existancelock);
+-		return r;
++		r = hiddev_ioctl_usage(hiddev, cmd, user_arg);
++		break;
+ 
+ 	case HIDIOCGCOLLECTIONINFO:
+-		if (copy_from_user(&cinfo, user_arg, sizeof(cinfo)))
+-			return -EFAULT;
++		if (copy_from_user(&cinfo, user_arg, sizeof(cinfo))) {
++			r = -EFAULT;
++			break;
++		}
+ 
+ 		if (cinfo.index >= hid->maxcollection)
+-			return -EINVAL;
++			break;
+ 
+ 		cinfo.type = hid->collection[cinfo.index].type;
+ 		cinfo.usage = hid->collection[cinfo.index].usage;
+ 		cinfo.level = hid->collection[cinfo.index].level;
+ 
+-		if (copy_to_user(user_arg, &cinfo, sizeof(cinfo)))
+-			return -EFAULT;
+-		return 0;
++		r = copy_to_user(user_arg, &cinfo, sizeof(cinfo)) ?
++			-EFAULT : 0;
++		break;
+ 
+ 	default:
+-
+ 		if (_IOC_TYPE(cmd) != 'H' || _IOC_DIR(cmd) != _IOC_READ)
+-			return -EINVAL;
++			break;
+ 
+ 		if (_IOC_NR(cmd) == _IOC_NR(HIDIOCGNAME(0))) {
+ 			int len;
+-			if (!hid->name)
+-				return 0;
++
++			if (!hid->name) {
++				r = 0;
++				break;
++			}
++
+ 			len = strlen(hid->name) + 1;
+ 			if (len > _IOC_SIZE(cmd))
+ 				 len = _IOC_SIZE(cmd);
+-			return copy_to_user(user_arg, hid->name, len) ?
++			r = copy_to_user(user_arg, hid->name, len) ?
+ 				-EFAULT : len;
++			break;
+ 		}
+ 
+ 		if (_IOC_NR(cmd) == _IOC_NR(HIDIOCGPHYS(0))) {
+ 			int len;
+-			if (!hid->phys)
+-				return 0;
++
++			if (!hid->phys) {
++				r = 0;
++				break;
++			}
++
+ 			len = strlen(hid->phys) + 1;
+ 			if (len > _IOC_SIZE(cmd))
+ 				len = _IOC_SIZE(cmd);
+-			return copy_to_user(user_arg, hid->phys, len) ?
++			r = copy_to_user(user_arg, hid->phys, len) ?
+ 				-EFAULT : len;
++			break;
+ 		}
+ 	}
+-	return -EINVAL;
++
++ret_unlock:
++	mutex_unlock(&hiddev->existancelock);
++	return r;
+ }
+ 
+ #ifdef CONFIG_COMPAT
+diff --git a/drivers/media/video/em28xx/em28xx-core.c b/drivers/media/video/em28xx/em28xx-core.c
+index 44c63cb..aec4715 100644
+--- a/drivers/media/video/em28xx/em28xx-core.c
++++ b/drivers/media/video/em28xx/em28xx-core.c
+@@ -774,8 +774,6 @@ int em28xx_resolution_set(struct em28xx *dev)
+ 	else
+ 		dev->vbi_height = 18;
+ 
+-	if (!dev->progressive)
+-		height >>= norm_maxh(dev);
+ 
+ 	em28xx_set_outfmt(dev);
+ 
 diff --git a/drivers/net/usb/Kconfig b/drivers/net/usb/Kconfig
 index d7b7018..17ea264 100644
 --- a/drivers/net/usb/Kconfig
@@ -1481,6 +1901,273 @@ index 81c76ad..9498fc3 100644
  
  	if ((dev->driver_info->flags & FLAG_WLAN) != 0)
  		SET_NETDEV_DEVTYPE(net, &wlan_type);
+diff --git a/drivers/usb/class/cdc-acm.c b/drivers/usb/class/cdc-acm.c
+index 40f6d85..d32bad4 100644
+--- a/drivers/usb/class/cdc-acm.c
++++ b/drivers/usb/class/cdc-acm.c
+@@ -363,6 +363,7 @@ static void acm_read_bulk(struct urb *urb)
+ 		dev_dbg(&acm->data->dev, "bulk rx status %d\n", status);
+ 
+ 	buf = rcv->buffer;
++	buf->head = buf->base;
+ 	buf->size = urb->actual_length;
+ 
+ 	if (likely(status == 0)) {
+@@ -392,6 +393,7 @@ static void acm_rx_tasklet(unsigned long _acm)
+ 	struct acm_ru *rcv;
+ 	unsigned long flags;
+ 	unsigned char throttled;
++	int copied;
+ 
+ 	dbg("Entering acm_rx_tasklet");
+ 
+@@ -423,12 +425,14 @@ next_buffer:
+ 
+ 	dbg("acm_rx_tasklet: procesing buf 0x%p, size = %d", buf, buf->size);
+ 
++	copied = buf->size;
+ 	if (tty) {
+ 		spin_lock_irqsave(&acm->throttle_lock, flags);
+ 		throttled = acm->throttle;
+ 		spin_unlock_irqrestore(&acm->throttle_lock, flags);
+ 		if (!throttled) {
+-			tty_insert_flip_string(tty, buf->base, buf->size);
++			copied = tty_insert_flip_string(tty,
++							buf->head, buf->size);
+ 			tty_flip_buffer_push(tty);
+ 		} else {
+ 			tty_kref_put(tty);
+@@ -440,9 +444,24 @@ next_buffer:
+ 		}
+ 	}
+ 
+-	spin_lock_irqsave(&acm->read_lock, flags);
+-	list_add(&buf->list, &acm->spare_read_bufs);
+-	spin_unlock_irqrestore(&acm->read_lock, flags);
++	buf->head += copied;
++	buf->size -= copied;
++
++	if (buf->size == 0) {
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->spare_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++	} else {
++		tty_kref_put(tty);
++		dbg("Partial buffer fill");
++		spin_lock_irqsave(&acm->read_lock, flags);
++		list_add(&buf->list, &acm->filled_read_bufs);
++		spin_unlock_irqrestore(&acm->read_lock, flags);
++		/* Make sure that the tasklet will get run again. */
++		schedule_work(&acm->work_throttle_check);
++		return;
++	}
++
+ 	goto next_buffer;
+ 
+ urbs:
+@@ -519,14 +538,14 @@ static void acm_write_bulk(struct urb *urb)
+ 	acm_write_done(acm, wb);
+ 	spin_unlock_irqrestore(&acm->write_lock, flags);
+ 	if (ACM_READY(acm))
+-		schedule_work(&acm->work);
++		schedule_work(&acm->work_wake);
+ 	else
+ 		wake_up_interruptible(&acm->drain_wait);
+ }
+ 
+-static void acm_softint(struct work_struct *work)
++static void acm_softint_wake(struct work_struct *work)
+ {
+-	struct acm *acm = container_of(work, struct acm, work);
++	struct acm *acm = container_of(work, struct acm, work_wake);
+ 	struct tty_struct *tty;
+ 
+ 	dev_vdbg(&acm->data->dev, "tx work\n");
+@@ -537,6 +556,42 @@ static void acm_softint(struct work_struct *work)
+ 	tty_kref_put(tty);
+ }
+ 
++static void acm_softint_throttle_check(struct work_struct *work)
++{
++	struct acm *acm = container_of(work, struct acm, work_throttle_check);
++	struct tty_struct *tty;
++	struct acm_rb *buf;
++	size_t needed = 1;
++	int available;
++
++	dev_vdbg(&acm->data->dev, "throttle check\n");
++	if (!ACM_READY(acm))
++		return;
++	tty = tty_port_tty_get(&acm->port);
++	if (!tty)
++		return;
++
++	/* See how much space is needed */
++	spin_lock(&acm->read_lock);
++	if (!list_empty(&acm->filled_read_bufs)) {
++		buf = list_entry(acm->filled_read_bufs.next,
++				 struct acm_rb, list);
++		needed = buf->size;
++	}
++	spin_unlock(&acm->read_lock);
++
++	available = tty_buffer_request_room(tty, needed);
++	if (available < needed) {
++		/* Throttle so that notification occurs when there is
++		 * more space available in the buffers. */
++		tty_throttle(tty);
++	} else {
++		/* Buffer has already been emptied, restart reading */
++		tasklet_schedule(&acm->urb_task);
++	}
++	tty_kref_put(tty);
++}
++
+ /*
+  * TTY handlers
+  */
+@@ -640,7 +695,6 @@ static int acm_tty_chars_in_buffer(struct tty_struct *tty);
+ static void acm_port_down(struct acm *acm, int drain)
+ {
+ 	int i, nr = acm->rx_buflimit;
+-	mutex_lock(&open_mutex);
+ 	if (acm->dev) {
+ 		usb_autopm_get_interface(acm->control);
+ 		acm_set_control(acm, acm->ctrlout = 0);
+@@ -658,14 +712,23 @@ static void acm_port_down(struct acm *acm, int drain)
+ 		acm->control->needs_remote_wakeup = 0;
+ 		usb_autopm_put_interface(acm->control);
+ 	}
+-	mutex_unlock(&open_mutex);
+ }
+ 
+ static void acm_tty_hangup(struct tty_struct *tty)
+ {
+-	struct acm *acm = tty->driver_data;
++	struct acm *acm;
++
++	mutex_lock(&open_mutex);
++	acm = tty->driver_data;
++ 
++	if (!acm)
++		goto out;
++
+ 	tty_port_hangup(&acm->port);
+ 	acm_port_down(acm, 0);
++
++out:
++	mutex_unlock(&open_mutex);
+ }
+ 
+ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
+@@ -676,8 +739,9 @@ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
+ 	   shutdown */
+ 	if (!acm)
+ 		return;
++
++	mutex_lock(&open_mutex);
+ 	if (tty_port_close_start(&acm->port, tty, filp) == 0) {
+-		mutex_lock(&open_mutex);
+ 		if (!acm->dev) {
+ 			tty_port_tty_set(&acm->port, NULL);
+ 			acm_tty_unregister(acm);
+@@ -689,6 +753,7 @@ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
+ 	acm_port_down(acm, 0);
+ 	tty_port_close_end(&acm->port, tty);
+ 	tty_port_tty_set(&acm->port, NULL);
++	mutex_unlock(&open_mutex);
+ }
+ 
+ static int acm_tty_write(struct tty_struct *tty,
+@@ -972,7 +1037,8 @@ static int acm_probe(struct usb_interface *intf,
+ 	}
+ 
+ 	if (!buflen) {
+-		if (intf->cur_altsetting->endpoint->extralen &&
++		if (intf->cur_altsetting->endpoint &&
++				intf->cur_altsetting->endpoint->extralen &&
+ 				intf->cur_altsetting->endpoint->extra) {
+ 			dev_dbg(&intf->dev,
+ 				"Seeking extra descriptors on endpoint\n");
+@@ -1165,7 +1231,8 @@ made_compressed_probe:
+ 	acm->rx_buflimit = num_rx_buf;
+ 	acm->urb_task.func = acm_rx_tasklet;
+ 	acm->urb_task.data = (unsigned long) acm;
+-	INIT_WORK(&acm->work, acm_softint);
++	INIT_WORK(&acm->work_wake, acm_softint_wake);
++	INIT_WORK(&acm->work_throttle_check, acm_softint_throttle_check);
+ 	init_waitqueue_head(&acm->drain_wait);
+ 	spin_lock_init(&acm->throttle_lock);
+ 	spin_lock_init(&acm->write_lock);
+@@ -1322,6 +1389,7 @@ static void stop_data_traffic(struct acm *acm)
+ 	dbg("Entering stop_data_traffic");
+ 
+ 	tasklet_disable(&acm->urb_task);
++	cancel_work_sync(&acm->work_throttle_check);
+ 
+ 	usb_kill_urb(acm->ctrlurb);
+ 	for (i = 0; i < ACM_NW; i++)
+@@ -1331,7 +1399,7 @@ static void stop_data_traffic(struct acm *acm)
+ 
+ 	tasklet_enable(&acm->urb_task);
+ 
+-	cancel_work_sync(&acm->work);
++	cancel_work_sync(&acm->work_wake);
+ }
+ 
+ static void acm_disconnect(struct usb_interface *intf)
+@@ -1488,6 +1556,11 @@ static int acm_reset_resume(struct usb_interface *intf)
+ 		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
+ 		USB_CDC_ACM_PROTO_VENDOR)
+ 
++#define SAMSUNG_PCSUITE_ACM_INFO(x) \
++		USB_DEVICE_AND_INTERFACE_INFO(0x04e7, x, \
++		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
++		USB_CDC_ACM_PROTO_VENDOR)
++
+ /*
+  * USB driver structure.
+  */
+@@ -1598,6 +1671,17 @@ static const struct usb_device_id acm_ids[] = {
+ 	{ NOKIA_PCSUITE_ACM_INFO(0x0108), }, /* Nokia 5320 XpressMusic 2G */
+ 	{ NOKIA_PCSUITE_ACM_INFO(0x01f5), }, /* Nokia N97, RM-505 */
+ 	{ NOKIA_PCSUITE_ACM_INFO(0x02e3), }, /* Nokia 5230, RM-588 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0178), }, /* Nokia E63 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x010e), }, /* Nokia E75 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x02d9), }, /* Nokia 6760 Slide */
++	{ NOKIA_PCSUITE_ACM_INFO(0x01d0), }, /* Nokia E52 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0223), }, /* Nokia E72 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0275), }, /* Nokia X6 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x026c), }, /* Nokia N97 Mini */
++	{ NOKIA_PCSUITE_ACM_INFO(0x0154), }, /* Nokia 5800 XpressMusic */
++	{ NOKIA_PCSUITE_ACM_INFO(0x04ce), }, /* Nokia E90 */
++	{ NOKIA_PCSUITE_ACM_INFO(0x01d4), }, /* Nokia E55 */
++	{ SAMSUNG_PCSUITE_ACM_INFO(0x6651), }, /* Samsung GTi8510 (INNOV8) */
+ 
+ 	/* NOTE: non-Nokia COMM/ACM/0xff is likely MSFT RNDIS... NOT a modem! */
+ 
+diff --git a/drivers/usb/class/cdc-acm.h b/drivers/usb/class/cdc-acm.h
+index 5eeb570..b7cf391 100644
+--- a/drivers/usb/class/cdc-acm.h
++++ b/drivers/usb/class/cdc-acm.h
+@@ -75,6 +75,7 @@ struct acm_rb {
+ 	struct list_head	list;
+ 	int			size;
+ 	unsigned char		*base;
++	unsigned char		*head;
+ 	dma_addr_t		dma;
+ };
+ 
+@@ -111,7 +112,8 @@ struct acm {
+ 	spinlock_t write_lock;
+ 	struct mutex mutex;
+ 	struct usb_cdc_line_coding line;		/* bits, stop, parity */
+-	struct work_struct work;			/* work queue entry for line discipline waking up */
++	struct work_struct work_wake;			/* for tty wake up */
++	struct work_struct work_throttle_check;		/* for throttling */
+ 	wait_queue_head_t drain_wait;			/* close processing */
+ 	struct tasklet_struct urb_task;                 /* rx processing */
+ 	spinlock_t throttle_lock;			/* synchronize throtteling and read callback */
 diff --git a/include/linux/usb/cdc.h b/include/linux/usb/cdc.h
 index c117a68..49e5fc3 100644
 --- a/include/linux/usb/cdc.h

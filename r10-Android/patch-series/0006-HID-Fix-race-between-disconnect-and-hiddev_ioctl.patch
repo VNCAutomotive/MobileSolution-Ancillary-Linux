@@ -1,7 +1,7 @@
-From fc6f75a79a053bb51b898772e27ecb45f615b9c2 Mon Sep 17 00:00:00 2001
+From e6a34257d9680961b426d2028bd40c179b030199 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Mon, 6 Dec 2010 17:51:41 +0300
-Subject: [PATCH 06/10]     HID: Fix race between disconnect and hiddev_ioctl
+Subject: [PATCH 06/13] HID: Fix race between disconnect and hiddev_ioctl
 
     A USB HID device can be disconnected at any time.
     If this happens right before or while hiddev_ioctl is in progress,

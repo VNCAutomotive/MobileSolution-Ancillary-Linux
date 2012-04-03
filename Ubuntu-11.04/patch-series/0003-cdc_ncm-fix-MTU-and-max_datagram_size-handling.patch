@@ -1,0 +1,78 @@
+From 83b6f4bd7703a599eadd134e587e519e56a17c71 Mon Sep 17 00:00:00 2001
+From: Alexey Orishko <alexey.orishko@stericsson.com>
+Date: Wed, 14 Mar 2012 22:26:11 +0100
+Subject: [PATCH 3/4] cdc_ncm: fix MTU and max_datagram_size handling
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Changes/fixes:
+- inform device if max_datagram_size was changed by host
+- max_datagram_size can't be bigger MTU in ETH func descr
+- fix constants definitions to enable running CAIF service over NCM
+
+Tested on Intel/ARM.
+
+Reviewed-by: Sjur Brændeland <sjur.brandeland@stericsson.com>
+Tested-by: Dmitry Tarnyagin <Dmitry.Tarnyagin@stericsson.com>
+Signed-off-by: Alexey Orishko <alexey.orishko@stericsson.com>
+
+This also contains a fix from RealVNC due to some platforms not
+allowing reads larger than 16k over USB.
+---
+ drivers/net/usb/cdc_ncm.c |   22 +++++++++++-----------
+ 1 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
+index 8028f42..084e38c 100644
+--- a/drivers/net/usb/cdc_ncm.c
++++ b/drivers/net/usb/cdc_ncm.c
+@@ -76,7 +76,7 @@
+  * Maximum amount of datagrams in NCM Datagram Pointer Table, not counting
+  * the last NULL entry. Any additional datagrams in NTB would be discarded.
+  */
+-#define	CDC_NCM_DPT_DATAGRAMS_MAX		32
++#define	CDC_NCM_DPT_DATAGRAMS_MAX		40
+ 
+ /* Maximum amount of IN datagrams in NTB */
+ #define	CDC_NCM_DPT_DATAGRAMS_IN_MAX		0 /* unlimited */
+@@ -397,15 +397,12 @@ static u8 cdc_ncm_setup(struct cdc_ncm_ctx *ctx)
+ 		} else {
+ 			ctx->max_datagram_size = le16_to_cpu(max_datagram_size);
+ 			/* Check Eth descriptor value */
+-			if (eth_max_sz < CDC_NCM_MAX_DATAGRAM_SIZE) {
+-				if (ctx->max_datagram_size > eth_max_sz)
++			if (ctx->max_datagram_size > eth_max_sz)
+ 					ctx->max_datagram_size = eth_max_sz;
+-			} else {
+-				if (ctx->max_datagram_size >
+-						CDC_NCM_MAX_DATAGRAM_SIZE)
+-					ctx->max_datagram_size =
++
++			if (ctx->max_datagram_size > CDC_NCM_MAX_DATAGRAM_SIZE)
++				ctx->max_datagram_size =
+ 						CDC_NCM_MAX_DATAGRAM_SIZE;
+-			}
+ 
+ 			if (ctx->max_datagram_size < CDC_NCM_MIN_DATAGRAM_SIZE)
+ 				ctx->max_datagram_size =
+@@ -420,10 +417,13 @@ static u8 cdc_ncm_setup(struct cdc_ncm_ctx *ctx)
+ 			req.wLength = 2;
+ 			max_datagram_size = cpu_to_le16(ctx->max_datagram_size);
+ 
+-			err = cdc_ncm_do_request(ctx, &req, &max_datagram_size,
++			if (ctx->max_datagram_size !=
++					le16_to_cpu(max_datagram_size)) {
++				err = cdc_ncm_do_request(ctx, &req, &max_datagram_size,
+ 								0, NULL, 1000);
+-			if (err)
+-				pr_debug("SET_MAX_DATAGRAM_SIZE failed\n");
++				if (err)
++					pr_debug("SET_MAX_DATAGRAM_SIZE failed\n");
++			}
+ 		}
+ 
+ 	}
+-- 
+1.7.4.1
+
