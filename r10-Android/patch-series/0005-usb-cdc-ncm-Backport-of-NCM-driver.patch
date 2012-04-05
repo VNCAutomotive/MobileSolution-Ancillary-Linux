@@ -1,7 +1,7 @@
-From c6a30d881abd17ddfd193b99ac2bca7939388140 Mon Sep 17 00:00:00 2001
+From ab532799fd8c2b683721b5452c68e71a62e1b768 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Sat, 17 Dec 2011 10:55:10 +0100
-Subject: [PATCH 05/13] usb: cdc-ncm: Backport of NCM driver
+Subject: [PATCH 05/14] usb: cdc-ncm: Backport of NCM driver
 
 This is a backport of the CDC NCM driver.
 
@@ -1689,5 +1689,5 @@ index 7ae27a4..9f5f4ae 100644
  /* CDC and RNDIS support the same host-chosen packet filters for IN transfers */
  #define	DEFAULT_FILTER	(USB_CDC_PACKET_TYPE_BROADCAST \
 -- 
-1.7.0.4
+1.7.4.1
 

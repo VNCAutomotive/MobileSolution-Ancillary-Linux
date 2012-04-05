@@ -1,7 +1,7 @@
-From 04775e38e57aebe1e1406a34cea9a5677e318ac8 Mon Sep 17 00:00:00 2001
+From 6228b608adcdb9537a31ccdb5d67e380542ff044 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Mon, 6 Dec 2010 18:16:11 +0300
-Subject: [PATCH 07/13] HID: Consolidate device existence checks in hiddev_ioctl
+Subject: [PATCH 07/14] HID: Consolidate device existence checks in hiddev_ioctl
 
     Currently, if the device has been removed before hiddev_ioctl(),
     the -EIO is returned. If it's removed while hiddev_ioctl() is in
@@ -451,5 +451,5 @@ index ae5586e..1f574e8 100644
  
  #ifdef CONFIG_COMPAT
 -- 
-1.7.0.4
+1.7.4.1
 

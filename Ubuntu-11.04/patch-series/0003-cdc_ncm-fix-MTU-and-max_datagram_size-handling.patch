@@ -1,7 +1,7 @@
-From 83b6f4bd7703a599eadd134e587e519e56a17c71 Mon Sep 17 00:00:00 2001
+From 5c37a11ad21a80f76bf439a048729e5b9bcc7246 Mon Sep 17 00:00:00 2001
 From: Alexey Orishko <alexey.orishko@stericsson.com>
 Date: Wed, 14 Mar 2012 22:26:11 +0100
-Subject: [PATCH 3/4] cdc_ncm: fix MTU and max_datagram_size handling
+Subject: [PATCH 3/5] cdc_ncm: fix MTU and max_datagram_size handling
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

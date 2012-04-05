@@ -1,7 +1,7 @@
-From 24aaa606a580dd4678b3e801e0852855aee8ca9c Mon Sep 17 00:00:00 2001
+From f77b0d42593165c26e6b1af8e03cc0126aaa0fc4 Mon Sep 17 00:00:00 2001
 From: Alexey Orishko <alexey.orishko@stericsson.com>
 Date: Wed, 14 Mar 2012 22:26:10 +0100
-Subject: [PATCH 2/4] cdc_ncm: reduce driver latency in the data path
+Subject: [PATCH 2/5] cdc_ncm: reduce driver latency in the data path
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

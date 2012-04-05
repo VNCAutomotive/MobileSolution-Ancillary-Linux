@@ -1,7 +1,7 @@
-From ac09e236351d0c95049d026118299cd92378fb6f Mon Sep 17 00:00:00 2001
+From 923ed61cb4e6fd5a4af2e40704c78b6aa8245215 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Mon, 21 Mar 2011 18:04:58 +0000
-Subject: [PATCH 02/13] USB: cdc-acm: Prevent data loss when filling tty buffer.
+Subject: [PATCH 02/14] USB: cdc-acm: Prevent data loss when filling tty buffer.
 
 When sending large quantities of data through a CDC ACM channel it is possible
 for data to be lost when attempting to copy the data to the tty buffer. This
@@ -91,5 +91,5 @@ index 5eeb570..d7581f6 100644
  };
  
 -- 
-1.7.0.4
+1.7.4.1
 

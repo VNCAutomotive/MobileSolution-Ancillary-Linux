@@ -1,7 +1,7 @@
-From a9548424aaf20d04b90d5b1961a4a259ff6189d3 Mon Sep 17 00:00:00 2001
+From 999e5997472d189addd39b3950987efcf19239d6 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Wed, 9 Nov 2011 13:47:38 -0800
-Subject: [PATCH 03/13] commit 5dc2470c602da8851907ec18942cd876c3b4ecc1
+Subject: [PATCH 03/14] commit 5dc2470c602da8851907ec18942cd876c3b4ecc1
 
     USB: cdc-acm: Fix disconnect() vs close() race
 
@@ -77,5 +77,5 @@ index 2259809..fc23f05 100644
  
  static int acm_tty_write(struct tty_struct *tty,
 -- 
-1.7.0.4
+1.7.4.1
 

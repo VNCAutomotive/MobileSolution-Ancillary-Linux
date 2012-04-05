@@ -1,7 +1,7 @@
-From 61dd9abc262fb32a2f84efbc175ddcf4a48d87e2 Mon Sep 17 00:00:00 2001
+From dff660153f6e03a93cccdc6110118dbe9c70b3af Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Thu, 2 Sep 2010 10:46:20 +0100
-Subject: [PATCH 01/13] USB: cdc-acm: Fixing crash when ACM probing interfaces with no endpoint descriptors.
+Subject: [PATCH 01/14] USB: cdc-acm: Fixing crash when ACM probing interfaces with no endpoint descriptors.
 
 Certain USB devices, such as the Nokia X6 mobile phone, don't expose any
 endpoint descriptors on some of their interfaces. If the ACM driver is forced
@@ -36,5 +36,5 @@ index 40f6d85..4ee84d8 100644
  			dev_dbg(&intf->dev,
  				"Seeking extra descriptors on endpoint\n");
 -- 
-1.7.0.4
+1.7.4.1
 

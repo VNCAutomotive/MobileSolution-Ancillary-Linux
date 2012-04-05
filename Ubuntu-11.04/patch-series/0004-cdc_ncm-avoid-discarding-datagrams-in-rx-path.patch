@@ -1,7 +1,7 @@
-From 14fd2e4345a4fb120d69e03610a85785107123a0 Mon Sep 17 00:00:00 2001
+From 9ba10e9aa3bb857131c749c0217abb59696ed5eb Mon Sep 17 00:00:00 2001
 From: Alexey Orishko <alexey.orishko@stericsson.com>
 Date: Wed, 14 Mar 2012 22:26:12 +0100
-Subject: [PATCH 4/4] cdc_ncm: avoid discarding datagrams in rx path
+Subject: [PATCH 4/5] cdc_ncm: avoid discarding datagrams in rx path
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
