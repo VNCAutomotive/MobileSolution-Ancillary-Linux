@@ -108,3 +108,12 @@ Patch based on 2.6.32-40.87
  }
  
  static int acm_tty_write(struct tty_struct *tty,
+--- a/drivers/usb/class/cdc-acm.h
++++ b/drivers/usb/class/cdc-acm.h
+@@ -75,5 +75,6 @@ struct acm_rb {
+ 	struct list_head	list;
+ 	int			size;
+ 	unsigned char		*base;
++	unsigned char		*head;
+ 	dma_addr_t		dma;
+ };
