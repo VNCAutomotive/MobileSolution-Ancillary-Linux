@@ -1,7 +1,7 @@
 From f334c8bacec81c75e469c9ea8102bd75f9d7a7d4 Mon Sep 17 00:00:00 2001
 From: Simon Haggett <simon.haggett@realvnc.com>
 Date: Tue, 3 Apr 2012 15:28:03 +0100
-Subject: [PATCH 5/5] usbhid: Check HID report descriptor contents after USB device reset
+Subject: [PATCH 5/9] usbhid: Check HID report descriptor contents after USB device reset
 
 When a USB device reset occurs, usbcore will refetch the device and configuration
 descriptors and compare them with those retrieved before the reset to ensure

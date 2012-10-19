@@ -1,7 +1,7 @@
 From a98e3505af217e91f1faef1e24d1acae771cbfe4 Mon Sep 17 00:00:00 2001
 From: Toby Gray <toby.gray@realvnc.com>
 Date: Tue, 3 Apr 2012 11:10:37 +0100
-Subject: [PATCH 1/5] This is a composite patch, containing all changes for the 2.1 release.
+Subject: [PATCH 1/9] This is a composite patch, containing all changes for the 2.1 release.
 
 This patch contains the following series of patches:
 

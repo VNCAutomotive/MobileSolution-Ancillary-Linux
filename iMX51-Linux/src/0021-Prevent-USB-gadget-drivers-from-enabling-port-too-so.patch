@@ -1,0 +1,40 @@
+From 8a32259b3a6d4cecf3f1d882cf9700295863c0bb Mon Sep 17 00:00:00 2001
+From: Simon Haggett <simon.haggett@realvnc.com>
+Date: Mon, 30 Jul 2012 14:39:32 +0100
+Subject: [PATCH] Prevent USB gadget drivers from enabling port too soon on Freescale boards
+
+When loaded, a USB gadget driver immediately enables the client USB port,
+allowing the device to be enumerated by the host. However, for the UVC
+gadget driver, this is not desired behaviour since the userland application
+must be started to handle UVC requests from the host.
+
+For Freescale controllers, the port is enabled by dr_controller_run(). This
+patch prevents this from occuring. This ensures correct functionality with
+the UVC gadget driver, but may cause problems with other gadget drivers.
+
+This patch is based on a workaround proposed by Fernandez Gonzalo <gfernandez@copreci.es>
+on the linux-usb mailing list thread "iMX25PDK - Problems with USB gadget" (3/5/2012).
+
+---
+ drivers/usb/gadget/arcotg_udc.c |    5 -----
+ 1 files changed, 0 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 9b400ba..74d50fe 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -512,11 +512,6 @@ static void dr_controller_run(struct fsl_udc *udc)
+ #endif
+ 		/* Clear stopped bit */
+ 		udc->stopped = 0;
+-
+-		/* The usb line has already been connected to pc */
+-		temp = fsl_readl(&dr_regs->usbcmd);
+-		temp |= USB_CMD_RUN_STOP;
+-		fsl_writel(temp, &dr_regs->usbcmd);
+ 		printk(KERN_DEBUG "%s: udc out low power mode\n", __func__);
+ 	}
+ 
+-- 
+1.7.4.1
+

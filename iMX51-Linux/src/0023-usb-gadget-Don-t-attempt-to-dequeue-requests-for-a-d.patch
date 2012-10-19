@@ -1,0 +1,40 @@
+From bfd08fefde6754fdc7f865ec50ecefdd9b19e47e Mon Sep 17 00:00:00 2001
+From: Simon Haggett <simon.haggett@realvnc.com>
+Date: Fri, 19 Oct 2012 16:15:57 +0100
+Subject: [PATCH] usb: gadget: Don't attempt to dequeue requests for a disabled USB endpoint on Freescale hardware
+
+Some gadget drivers may attempt to dequeue requests for an endpoint that has
+already been disabled. For example, in the UVC gadget driver, uvc_function_set_alt()
+will call usb_ep_disable() when alt setting 0 is selected. When the userspace
+application subsequently issues the VIDIOC_STREAMOFF ioctl, uvc_video_enable()
+invokes usb_ep_dequeue() to ensure that all requests have been cancelled.
+
+For Freescale controllers, fsl_ep_dequeue() provides the implementation of
+usb_ep_dequeue(). If this is called for a disabled endpoint, a kernel oops will
+occur as the ep->desc field is dereferenced (by ep_index()). fsl_ep_disable()
+sets this field to NULL, as well as deleting all pending requests for the
+endpoint.
+
+This patch adds an additional check to fsl_ep_dequeue() to ensure that the
+endpoint has not already been disabled before attempting to dequeue requests.
+---
+ drivers/usb/gadget/arcotg_udc.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 74d50fe..8efd1c5 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1139,7 +1139,8 @@ static int fsl_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
+ 	int ep_num, stopped, ret = 0;
+ 	u32 epctrl;
+ 
+-	if (!_ep || !_req)
++	/* Ensure that the ep and request are valid, and the ep is not disabled */
++	if (!_ep || !_req || !ep->desc)
+ 		return -EINVAL;
+ 
+ 	spin_lock_irqsave(&ep->udc->lock, flags);
+-- 
+1.7.4.1
+
