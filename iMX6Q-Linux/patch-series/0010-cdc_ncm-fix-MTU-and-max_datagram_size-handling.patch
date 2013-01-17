@@ -1,0 +1,96 @@
+From e16a4e9cf823fd5c597fd5d23076ab4ffa0b0f02 Mon Sep 17 00:00:00 2001
+From: Alexey Orishko <alexey.orishko@stericsson.com>
+Date: Wed, 14 Mar 2012 22:26:11 +0100
+Subject: [PATCH 10/11] cdc_ncm: fix MTU and max_datagram_size handling
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Changes/fixes:
+- inform device if max_datagram_size was changed by host
+- max_datagram_size can't be bigger MTU in ETH func descr
+- fix constants definitions to enable running CAIF service over NCM
+
+Tested on Intel/ARM.
+
+Reviewed-by: Sjur Brændeland <sjur.brandeland@stericsson.com>
+Tested-by: Dmitry Tarnyagin <Dmitry.Tarnyagin@stericsson.com>
+Signed-off-by: Alexey Orishko <alexey.orishko@stericsson.com>
+
+This also contains a fix from RealVNC due to some platforms not
+allowing reads larger than 16k over USB.
+---
+ drivers/net/usb/cdc_ncm.c |   28 +++++++++++++---------------
+ 1 files changed, 13 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
+index 248a3e0..677c34b 100644
+--- a/drivers/net/usb/cdc_ncm.c
++++ b/drivers/net/usb/cdc_ncm.c
+@@ -76,7 +76,7 @@
+  * Maximum amount of datagrams in NCM Datagram Pointer Table, not counting
+  * the last NULL entry. Any additional datagrams in NTB would be discarded.
+  */
+-#define	CDC_NCM_DPT_DATAGRAMS_MAX		32
++#define	CDC_NCM_DPT_DATAGRAMS_MAX		40
+ 
+ /* Maximum amount of IN datagrams in NTB */
+ #define	CDC_NCM_DPT_DATAGRAMS_IN_MAX		0 /* unlimited */
+@@ -376,27 +376,25 @@ size_err:
+ 		if (err < 0) {
+ 			pr_debug("GET_MAX_DATAGRAM_SIZE failed, use size=%u\n",
+ 						CDC_NCM_MIN_DATAGRAM_SIZE);
+-			kfree(max_datagram_size);
+ 		} else {
+ 			ctx->max_datagram_size =
+ 				le16_to_cpu(*max_datagram_size);
+ 			/* Check Eth descriptor value */
+-			if (eth_max_sz < CDC_NCM_MAX_DATAGRAM_SIZE) {
+-				if (ctx->max_datagram_size > eth_max_sz)
++			if (ctx->max_datagram_size > eth_max_sz)
+ 					ctx->max_datagram_size = eth_max_sz;
+-			} else {
+-				if (ctx->max_datagram_size >
+-						CDC_NCM_MAX_DATAGRAM_SIZE)
+-					ctx->max_datagram_size =
++
++			if (ctx->max_datagram_size > CDC_NCM_MAX_DATAGRAM_SIZE)
++				ctx->max_datagram_size =
+ 						CDC_NCM_MAX_DATAGRAM_SIZE;
+-			}
+ 
+ 			if (ctx->max_datagram_size < CDC_NCM_MIN_DATAGRAM_SIZE)
+ 				ctx->max_datagram_size =
+ 					CDC_NCM_MIN_DATAGRAM_SIZE;
+ 
+ 			/* if value changed, update device */
+-			err = usb_control_msg(ctx->udev,
++			if (ctx->max_datagram_size !=
++				le16_to_cpu(*max_datagram_size)) {
++				err = usb_control_msg(ctx->udev,
+ 						usb_sndctrlpipe(ctx->udev, 0),
+ 						USB_CDC_SET_MAX_DATAGRAM_SIZE,
+ 						USB_TYPE_CLASS | USB_DIR_OUT
+@@ -404,14 +402,14 @@ size_err:
+ 						0,
+ 						iface_no, max_datagram_size,
+ 						2, 1000);
+-			kfree(max_datagram_size);
+-max_dgram_err:
+-			if (err < 0)
+-				pr_debug("SET_MAX_DATAGRAM_SIZE failed\n");
++				if (err < 0)
++					pr_debug("SET_MAX_DATAGRAM_SIZE failed\n");
++			}
+ 		}
+-
++		kfree(max_datagram_size);
+ 	}
+ 
++max_dgram_err:
+ 	if (ctx->netdev->mtu != (ctx->max_datagram_size - ETH_HLEN))
+ 		ctx->netdev->mtu = ctx->max_datagram_size - ETH_HLEN;
+ 
+-- 
+1.7.4.1
+

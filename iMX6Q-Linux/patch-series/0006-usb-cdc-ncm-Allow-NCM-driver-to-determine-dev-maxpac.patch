@@ -1,0 +1,31 @@
+From 47b72596b88f737839ed82e80773d451862628a3 Mon Sep 17 00:00:00 2001
+From: Toby Gray <toby.gray@realvnc.com>
+Date: Wed, 15 Feb 2012 14:47:41 +0000
+Subject: [PATCH 06/11] usb: cdc-ncm: Allow NCM driver to determine dev->maxpacket
+
+As the NCM driver does not necessarily select the alternate setting
+which presents the data bulk endpoints, dev->maxpacket can't be set
+correctly by usbnet.
+
+This fixes this by getting the NCM driver to set the dev->maxpacket itself.
+
+Signed-off-by: Toby Gray <toby.gray@realvnc.com>
+---
+ drivers/net/usb/cdc_ncm.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
+index d3dec98..bb1d83b 100644
+--- a/drivers/net/usb/cdc_ncm.c
++++ b/drivers/net/usb/cdc_ncm.c
+@@ -605,6 +605,7 @@ advance:
+ 		ctx->out_ep->desc.bEndpointAddress & USB_ENDPOINT_NUMBER_MASK);
+ 	dev->status = ctx->status_ep;
+ 	dev->rx_urb_size = ctx->rx_max;
++	dev->maxpacket = le16_to_cpu(ctx->out_ep->desc.wMaxPacketSize);
+ 
+ 	/*
+ 	 * We should get an event when network connection is "connected" or
+-- 
+1.7.4.1
+

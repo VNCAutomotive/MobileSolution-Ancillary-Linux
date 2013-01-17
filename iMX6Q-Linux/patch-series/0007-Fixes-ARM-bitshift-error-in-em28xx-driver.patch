@@ -1,0 +1,26 @@
+From c9d0391ba3b124974064c97fd66cc61cec21038b Mon Sep 17 00:00:00 2001
+From: Toby Gray <toby.gray@realvnc.com>
+Date: Thu, 2 Sep 2010 10:46:20 +0100
+Subject: [PATCH 07/11] Fixes ARM bitshift error in em28xx driver
+
+This fixes an issue with bitshifting on ARM builds of em28xx.
+---
+ drivers/media/video/em28xx/em28xx-core.c |    2 --
+ 1 files changed, 0 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/em28xx/em28xx-core.c b/drivers/media/video/em28xx/em28xx-core.c
+index e33f145..f51366e 100644
+--- a/drivers/media/video/em28xx/em28xx-core.c
++++ b/drivers/media/video/em28xx/em28xx-core.c
+@@ -775,8 +775,6 @@ int em28xx_resolution_set(struct em28xx *dev)
+ 	else
+ 		dev->vbi_height = 18;
+ 
+-	if (!dev->progressive)
+-		height >>= norm_maxh(dev);
+ 
+ 	em28xx_set_outfmt(dev);
+ 
+-- 
+1.7.4.1
+
