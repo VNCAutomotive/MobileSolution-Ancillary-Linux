@@ -1,0 +1,440 @@
+From 519b221dfbe8cc8b04ec91979e5b2e841159a1a8 Mon Sep 17 00:00:00 2001
+From: Simon Haggett <simon.haggett@realvnc.com>
+Date: Thu, 31 Jan 2013 15:14:06 +0000
+Subject: [PATCH] Qt 4.7.1 QWS server multi-touch support on i.MX6Q EVK boards
+
+This patch adds support for multi-touch on i.MX6Q EVK boards to the QWS server
+in Qt 4.7.1. This support may also work on i.MX6S EVK boards. Widgets
+supporting touch events will receive QTouchEvents, as described in the Qt
+developer documentation. For widgets not supporting touch events, Qt
+automatically translates these into QPointerEvents. See the Qt developer
+documentation for further information.
+
+To include multi-touch support when building Qt, specify the parameter
+-DQT_IMX6_MULTITOUCH when invoking configure for a Qt Embedded build.
+
+To enable this support at runtime, ensure that the environment variable
+QWS_MOUSE_PROTO is unset, and that QWS_IMX6_TOUCH_DEVICE is set to specify the
+input event handle to use. For example:
+
+$ QWS_IMX6_TOUCH_DEVICE=/dev/input/event1 ./myapp -qws
+
+Note that the QWS mouse pointer will not respond to touch events. To disable
+the mouse pointer, launch the application with the -nomouse parameter
+(specified directly after -qws).
+
+Co-authored-by: Bruce Bye <bruce.bye@realvnc.com>
+---
+ src/gui/kernel/qapplication.cpp     |   21 ++-
+ src/gui/kernel/qapplication.h       |    3 +
+ src/gui/kernel/qapplication_p.h     |   17 ++
+ src/gui/kernel/qapplication_qws.cpp |  289 +++++++++++++++++++++++++++++++++++
+ src/gui/kernel/qwidget.cpp          |    6 +-
+ 5 files changed, 326 insertions(+), 10 deletions(-)
+
+diff --git a/src/gui/kernel/qapplication.cpp b/src/gui/kernel/qapplication.cpp
+index 64237ab..66c1c7e 100644
+--- a/src/gui/kernel/qapplication.cpp
++++ b/src/gui/kernel/qapplication.cpp
+@@ -5739,14 +5739,19 @@ void QApplicationPrivate::translateRawTouchEvent(QWidget *window,
+                 continue;
+ 
+             QTouchEvent::TouchPoint previousTouchPoint = d->appCurrentTouchPoints.take(touchPoint.id());
+-            touchPoint.d->startScreenPos = previousTouchPoint.startScreenPos();
+-            touchPoint.d->lastScreenPos = previousTouchPoint.screenPos();
+-            touchPoint.d->startPos = previousTouchPoint.startPos();
+-            touchPoint.d->lastPos = previousTouchPoint.pos();
+-            touchPoint.d->startNormalizedPos = previousTouchPoint.startNormalizedPos();
+-            touchPoint.d->lastNormalizedPos = previousTouchPoint.normalizedPos();
+-            if (touchPoint.pressure() < qreal(0.))
+-                touchPoint.d->pressure = qreal(0.);
++
++            // Suppress repeated releases
++            if (previousTouchPoint.pressure() > qreal(0.0))
++            {
++                touchPoint.d->startScreenPos = previousTouchPoint.startScreenPos();
++                touchPoint.d->lastScreenPos = previousTouchPoint.screenPos();
++                touchPoint.d->startPos = previousTouchPoint.startPos();
++                touchPoint.d->lastPos = previousTouchPoint.pos();
++                touchPoint.d->startNormalizedPos = previousTouchPoint.startNormalizedPos();
++                touchPoint.d->lastNormalizedPos = previousTouchPoint.normalizedPos();
++                if (touchPoint.pressure() < qreal(0.))
++                    touchPoint.d->pressure = qreal(0.);
++            }
+             break;
+         }
+         default:
+diff --git a/src/gui/kernel/qapplication.h b/src/gui/kernel/qapplication.h
+index af7e1b8..6c627bd 100644
+--- a/src/gui/kernel/qapplication.h
++++ b/src/gui/kernel/qapplication.h
+@@ -412,6 +412,9 @@ private:
+ #if defined(QT_RX71_MULTITOUCH)
+     Q_PRIVATE_SLOT(d_func(), void _q_readRX71MultiTouchEvents())
+ #endif
++#if defined(QT_IMX6_MULTITOUCH)
++    Q_PRIVATE_SLOT(d_func(), void _q_readIMX6MultiTouchEvents())
++#endif
+ #if defined(Q_OS_SYMBIAN)
+     Q_PRIVATE_SLOT(d_func(), void _q_aboutToQuit())
+ #endif
+diff --git a/src/gui/kernel/qapplication_p.h b/src/gui/kernel/qapplication_p.h
+index b98f562..9580f50 100644
+--- a/src/gui/kernel/qapplication_p.h
++++ b/src/gui/kernel/qapplication_p.h
+@@ -595,6 +595,23 @@ public:
+     void _q_readRX71MultiTouchEvents();
+ #endif
+ 
++#ifdef QT_IMX6_MULTITOUCH
++    bool hasIMX6MultiTouch;
++
++    struct IMX6TouchDeviceState {
++        QSocketNotifier *socketNotifier;
++        QList<QTouchEvent::TouchPoint> touchPoints;
++
++        int minX, maxX, scaleX;
++        int minY, maxY, scaleY;
++        int minZ, maxZ;
++    };
++    IMX6TouchDeviceState imx6TouchDevice;
++
++    bool readIMX6MultiTouchEvents();
++    void _q_readIMX6MultiTouchEvents();
++#endif
++
+ #if defined(Q_OS_SYMBIAN)
+     int pressureSupported;
+     int maxTouchPressure;
+diff --git a/src/gui/kernel/qapplication_qws.cpp b/src/gui/kernel/qapplication_qws.cpp
+index 230b95f..d7dfa44 100644
+--- a/src/gui/kernel/qapplication_qws.cpp
++++ b/src/gui/kernel/qapplication_qws.cpp
+@@ -125,6 +125,12 @@
+ #endif
+ #endif
+ 
++#ifdef QT_IMX6_MULTITOUCH
++#  include <qsocketnotifier.h>
++#  include <linux/input.h>
++#  include <errno.h>
++#endif
++
+ QT_BEGIN_NAMESPACE
+ 
+ #ifndef QT_NO_DIRECTPAINTER
+@@ -3774,11 +3780,294 @@ void QApplication::setArgs(int c, char **v)
+     d->argv = v;
+ }
+ 
++#if defined(QT_IMX6_MULTITOUCH)
++
++static inline int testBit(const char *array, int bit)
++{
++    return (array[bit/8] & (1<<(bit%8)));
++}
++
++static int openMTDevice(const QByteArray &deviceName)
++{
++    int fd = open(deviceName, O_RDONLY | O_NONBLOCK);
++    if (fd == -1) {
++        fd = -errno;
++        return fd;
++    }
++
++    // fetch the event type mask and check that the device reports absolute coordinates
++    char eventTypeMask[(EV_MAX + sizeof(char) - 1) * sizeof(char) + 1];
++    memset(eventTypeMask, 0, sizeof(eventTypeMask));
++    if (ioctl(fd, EVIOCGBIT(0, sizeof(eventTypeMask)), eventTypeMask) < 0) {
++        close(fd);
++        return -1;
++    }
++    if (!testBit(eventTypeMask, EV_ABS)) {
++        close(fd);
++        return -1;
++    }
++
++    // make sure that we can get the absolute X and Y positions from the device
++    char absMask[(ABS_MAX + sizeof(char) - 1) * sizeof(char) + 1];
++    memset(absMask, 0, sizeof(absMask));
++    if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(absMask)), absMask) < 0) {
++        close(fd);
++        return -1;
++    }
++    if (!testBit(absMask, ABS_X) ||
++        !testBit(absMask, ABS_Y)) {
++        close(fd);
++        return -1;
++    }
++
++    return fd;
++}
++
++void QApplicationPrivate::initializeMultitouch_sys()
++{
++    Q_Q(QApplication);
++
++    hasIMX6MultiTouch = false;
++
++    QByteArray deviceName = qgetenv("QWS_IMX6_TOUCH_DEVICE");
++    if (deviceName.isEmpty())
++    {
++        qWarning("QWS_IMX6_TOUCH_DEVICE undefined, i.MX6 touch input disabled");
++        return;
++    }
++
++    int fd = openMTDevice(deviceName);
++    if (fd == -ENOENT) {
++        // handle not found
++        qWarning("Device %s does not exist, i.MX6 touch input disabled", deviceName.data());
++        return;
++    }
++    if (fd < 0) {
++        // not a touch device
++        qWarning("Device %s is not a touch device, i.MX6 touch input disabled", deviceName.data());
++        return;
++    }
++
++    struct input_absinfo abs_x, abs_y, abs_z;
++    ioctl(fd, EVIOCGABS(ABS_X), &abs_x);
++    ioctl(fd, EVIOCGABS(ABS_Y), &abs_y);
++    ioctl(fd, EVIOCGABS(ABS_Z), &abs_z);
++
++    QSocketNotifier *socketNotifier = new QSocketNotifier(fd, QSocketNotifier::Read, q);
++    QObject::connect(socketNotifier, SIGNAL(activated(int)), q, SLOT(_q_readIMX6MultiTouchEvents()));
++
++    imx6TouchDevice = {
++        socketNotifier,
++        QList<QTouchEvent::TouchPoint>(),
++
++        abs_x.minimum, abs_x.maximum, q->desktop()->screenGeometry().width(),
++        abs_y.minimum, abs_y.maximum, q->desktop()->screenGeometry().height(),
++        abs_z.minimum, abs_z.maximum
++    };
++
++    hasIMX6MultiTouch = true;
++}
++
++void QApplicationPrivate::cleanupMultitouch_sys()
++{
++    if (hasIMX6MultiTouch)
++    {
++        hasIMX6MultiTouch = false;
++        QSocketNotifier *socketNotifier = imx6TouchDevice.socketNotifier;
++        close(socketNotifier->socket());
++        delete socketNotifier;
++    }
++}
++
++bool QApplicationPrivate::readIMX6MultiTouchEvents()
++{
++    QSocketNotifier *socketNotifier = imx6TouchDevice.socketNotifier;
++    int fd = socketNotifier->socket();
++
++    QTouchEvent::TouchPoint touchPoint;
++    QPointF screenPos;
++
++    // Remove tracks that were released in the last iteration.
++    for (int i = 0; i < imx6TouchDevice.touchPoints.count();)
++    {
++        if (imx6TouchDevice.touchPoints.value(i).state() == Qt::TouchPointReleased)
++        {
++            imx6TouchDevice.touchPoints.removeAt(i);
++        }
++        else if (imx6TouchDevice.touchPoints.value(i).id() == -1)
++        {
++            // Sometimes end up with a track reporting id -1 somehow.  Tidy it.
++            imx6TouchDevice.touchPoints.removeAt(i);
++        }
++        else
++            i++;
++    }
++
++    bool changed = false, down = false;
++    for (;;) {
++        struct input_event inputEvent;
++        int bytesRead = read(fd, &inputEvent, sizeof(inputEvent));
++        if (bytesRead <= 0)
++            break;
++        if (bytesRead != sizeof(inputEvent)) {
++            qWarning("Qt: INTERNAL ERROR: short read in readIMX6MultiTouchEvents()");
++            return false;
++        }
++
++        switch (inputEvent.type) {
++        case EV_SYN:
++            switch (inputEvent.code) {
++            case SYN_MT_REPORT:
++                if (down && touchPoint.state() != Qt::TouchPointReleased)
++                    touchPoint.setState(changed ? Qt::TouchPointMoved : Qt::TouchPointStationary);
++                changed = changed || (touchPoint.state() != Qt::TouchPointStationary);
++                imx6TouchDevice.touchPoints.append(touchPoint);
++                break;
++            case SYN_REPORT:
++                // Report any changes.  Could possibly be more performant by
++                // compressing movements, but then might we lose gesture resolution?
++                if (changed)
++                    return true;
++                break;
++            default:
++                qWarning("Qt: WARNING: Unrecognized EV_SYN code: %d", inputEvent.code);
++                break;
++            }
++
++            continue;
++        case EV_KEY:
++        case EV_ABS:
++            break;
++        default:
++            qWarning("Qt: WARNING: unknown event type %d on multitouch device", inputEvent.type);
++            continue;
++        }
++
++        switch (inputEvent.code) {
++        case BTN_TOUCH:
++        case ABS_MT_TOUCH_MAJOR:
++            if (!down && inputEvent.value != 0)
++            {
++                touchPoint.setState(Qt::TouchPointPressed);
++                touchPoint.setPressure(1.0);
++                changed = true;
++            }
++            else if (down && inputEvent.value == 0)
++            {
++                touchPoint.setState(Qt::TouchPointReleased);
++                touchPoint.setPressure(0.0);
++                changed = true;
++            }
++            break;
++        case ABS_TOOL_WIDTH:
++        case ABS_VOLUME:
++        case ABS_PRESSURE:
++            // ignore for now
++            break;
++        case ABS_MT_TRACKING_ID:
++        {
++            // Get the touch point state for this track
++            bool unseen = true;
++            int i;
++            for (i = 0; i < imx6TouchDevice.touchPoints.count(); i++)
++            {
++                QTouchEvent::TouchPoint tp = imx6TouchDevice.touchPoints.value(i);
++                if (tp.id() == inputEvent.value)
++                {
++                    touchPoint = imx6TouchDevice.touchPoints.takeAt(i);
++                    unseen = false;
++                    break;
++                }
++            }
++            if (unseen)
++            {
++                // Create a new touchpoint track
++                touchPoint = QTouchEvent::TouchPoint(inputEvent.value);
++                touchPoint.setPressure(qreal(0.0));
++                down = false;
++                changed = true;
++            }
++            else
++            {
++                down = touchPoint.state() != Qt::TouchPointReleased;
++                if (down)
++                    touchPoint.setState(Qt::TouchPointStationary);
++            }
++            screenPos = touchPoint.screenPos();
++            break;
++        }
++        case ABS_X:
++        case ABS_MT_POSITION_X:
++        {
++            qreal newValue = ((qreal(inputEvent.value - imx6TouchDevice.minX)
++                              / qreal(imx6TouchDevice.maxX - imx6TouchDevice.minX))
++                              * imx6TouchDevice.scaleX);
++            screenPos.rx() = newValue;
++            if (touchPoint.screenPos().rx() != newValue)
++            {
++                touchPoint.setScreenPos(screenPos);
++                changed = true;
++            }
++            break;
++        }
++        case ABS_Y:
++        case ABS_MT_POSITION_Y:
++        {
++            qreal newValue = ((qreal(inputEvent.value - imx6TouchDevice.minY)
++                              / qreal(imx6TouchDevice.maxY - imx6TouchDevice.minY))
++                              * imx6TouchDevice.scaleY);
++            screenPos.ry() = newValue;
++            if (touchPoint.screenPos().ry() != newValue)
++            {
++                touchPoint.setScreenPos(screenPos);
++                changed = true;
++            }
++            break;
++        }
++        case ABS_Z:
++        {
++            // map Z (signal strength) to pressure for now
++            qreal newValue = (qreal(inputEvent.value - imx6TouchDevice.minZ)
++                              / qreal(imx6TouchDevice.maxZ - imx6TouchDevice.minZ));
++            touchPoint.setPressure(newValue);
++            break;
++        }
++        default:
++            qWarning("Qt: WARNING: unknown event code %d on multitouch device", inputEvent.code);
++            continue;
++        }
++    }
++
++    return changed;
++}
++
++void QApplicationPrivate::_q_readIMX6MultiTouchEvents()
++{
++    // read touch events from all devices
++    bool changed = readIMX6MultiTouchEvents();
++    if (!changed)
++        return;
++
++    QList<QTouchEvent::TouchPoint> touchPoints;
++    QList<QTouchEvent::TouchPoint> srcTouches =
++                                          imx6TouchDevice.touchPoints;
++    for (int i = 0; i < srcTouches.count(); i++)
++    {
++        touchPoints.append(srcTouches.at(i));
++    }
++
++    translateRawTouchEvent(0, QTouchEvent::TouchScreen, touchPoints);
++}
++
++#else // !QT_IMX6_MULTITOUCH
++
+ void QApplicationPrivate::initializeMultitouch_sys()
+ { }
+ void QApplicationPrivate::cleanupMultitouch_sys()
+ { }
+ 
++#endif // QT_IMX6_MULTITOUCH
++
+ /* \internal
+    This is used to clean up the qws server
+    in case the QApplication constructor threw an exception
+diff --git a/src/gui/kernel/qwidget.cpp b/src/gui/kernel/qwidget.cpp
+index 4a3e680..9073187 100644
+--- a/src/gui/kernel/qwidget.cpp
++++ b/src/gui/kernel/qwidget.cpp
+@@ -8626,8 +8626,10 @@ bool QWidget::event(QEvent *event)
+         QMouseEvent mouseEvent(eventType,
+                                touchPoint.pos().toPoint(),
+                                touchPoint.screenPos().toPoint(),
+-                               Qt::LeftButton,
+-                               Qt::LeftButton,
++                               (eventType == QEvent::MouseMove) ?
++                                    Qt::NoButton : Qt::LeftButton,
++                               (eventType == QEvent::MouseButtonRelease) ?
++                                    Qt::NoButton : Qt::LeftButton,
+                                touchEvent->modifiers());
+         (void) QApplication::sendEvent(this, &mouseEvent);
+ #endif // Q_WS_MAC
+-- 
+1.7.4.1
+
