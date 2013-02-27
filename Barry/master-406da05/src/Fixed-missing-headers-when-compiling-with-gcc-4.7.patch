@@ -1,0 +1,63 @@
+From 021a5d8f756e886bdffed0883ff8c88ceda79ef0 Mon Sep 17 00:00:00 2001
+From: Chris Frey <cdfrey@foursquare.net>
+Date: Thu, 5 Apr 2012 15:42:16 -0400
+Subject: [PATCH] Fixed missing headers when compiling with gcc 4.7
+
+---
+ src/connector.cc |    1 +
+ tools/bio.cc     |    1 +
+ tools/bjdwp.cc   |    1 +
+ tools/bwatch.cc  |    1 +
+ 4 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/src/connector.cc b/src/connector.cc
+index 837ae7b..d9d40a3 100644
+--- a/src/connector.cc
++++ b/src/connector.cc
+@@ -24,6 +24,7 @@
+ #include "controller.h"
+ #include "m_desktop.h"
+ #include "debug.h"
++#include <unistd.h>
+ 
+ using namespace std;
+ using namespace Barry;
+diff --git a/tools/bio.cc b/tools/bio.cc
+index f0bcbb5..d412b20 100644
+--- a/tools/bio.cc
++++ b/tools/bio.cc
+@@ -37,6 +37,7 @@
+ #include <stdexcept>
+ #include <tr1/memory>
+ #include <strings.h>
++#include <unistd.h>
+ 
+ #include "barrygetopt.h"
+ 
+diff --git a/tools/bjdwp.cc b/tools/bjdwp.cc
+index 0ca74b3..14feda2 100644
+--- a/tools/bjdwp.cc
++++ b/tools/bjdwp.cc
+@@ -25,6 +25,7 @@
+ #include <iostream>
+ #include <string>
+ #include <stdlib.h>
++#include <unistd.h>
+ #include "i18n.h"
+ 
+ using namespace std;
+diff --git a/tools/bwatch.cc b/tools/bwatch.cc
+index 7b0210a..ca0ca46 100644
+--- a/tools/bwatch.cc
++++ b/tools/bwatch.cc
+@@ -31,6 +31,7 @@
+ #include <algorithm>
+ #include <fstream>
+ #include <string.h>
++#include <unistd.h>
+ #include <SDL/SDL.h>
+ 
+ using namespace std;
+-- 
+1.6.5.GIT
+
