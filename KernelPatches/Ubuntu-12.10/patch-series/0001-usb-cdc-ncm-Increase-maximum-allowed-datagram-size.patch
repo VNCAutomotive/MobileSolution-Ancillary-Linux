@@ -1,0 +1,34 @@
+From 54b52eb473a78cbbe18d77331c35dbfcbad5f25b Mon Sep 17 00:00:00 2001
+From: Toby Gray <toby.gray@realvnc.com>
+Date: Tue, 14 Feb 2012 14:39:35 +0000
+Subject: [PATCH] usb: cdc-ncm: Increase maximum allowed datagram size
+
+Some NCM devices exist which will send datagrams larger than 2k and
+don't support the GetMaxDatagramSize request, such as the Nokia 701
+Mobile Telephone.
+
+This sets the maximum limit of datagrams to the theoretical limit for
+16-bit NTBs, preventing dropping of large datagrams received from some
+devices.
+
+Signed-off-by: Toby Gray <toby.gray@realvnc.com>
+---
+ drivers/net/usb/cdc_ncm.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
+index 4b9513f..68bc2a0 100644
+--- a/drivers/net/usb/cdc_ncm.c
++++ b/drivers/net/usb/cdc_ncm.c
+@@ -67,7 +67,7 @@
+ #define	CDC_NCM_MIN_TX_PKT			512	/* bytes */
+ 
+ /* Default value for MaxDatagramSize */
+-#define	CDC_NCM_MAX_DATAGRAM_SIZE		8192	/* bytes */
++#define	CDC_NCM_MAX_DATAGRAM_SIZE		16356	/* bytes */
+ 
+ /*
+  * Maximum amount of datagrams in NCM Datagram Pointer Table, not counting
+-- 
+1.7.10.4
+

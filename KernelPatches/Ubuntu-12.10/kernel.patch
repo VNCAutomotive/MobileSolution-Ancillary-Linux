@@ -1,0 +1,13 @@
+diff --git a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
+index 4b9513f..68bc2a0 100644
+--- a/drivers/net/usb/cdc_ncm.c
++++ b/drivers/net/usb/cdc_ncm.c
+@@ -67,7 +67,7 @@
+ #define	CDC_NCM_MIN_TX_PKT			512	/* bytes */
+ 
+ /* Default value for MaxDatagramSize */
+-#define	CDC_NCM_MAX_DATAGRAM_SIZE		8192	/* bytes */
++#define	CDC_NCM_MAX_DATAGRAM_SIZE		16356	/* bytes */
+ 
+ /*
+  * Maximum amount of datagrams in NCM Datagram Pointer Table, not counting
