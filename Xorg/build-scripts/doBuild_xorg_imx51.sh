@@ -120,8 +120,7 @@ if [ -n "\$KEYBOARD_DEVICE" ]; then
   echo using \$KEYBOARD_DEVICE for keyboard input
   KEYBOARD_OPTION="-keybd evdev,,device=\$KEYBOARD_DEVICE,XkbModel=pc105,XkbRules=evdev,XkbLayout=gb,XkbOptions=compose:ralt"
 else
-  echo No keyboard found, please set KEYBOARD_DEVICE to the correct /dev/input/event
-device
+  echo No keyboard found, please set KEYBOARD_DEVICE to the correct /dev/input/event device
 fi
 if [ "\$1" = "-mouse" ]
 then
